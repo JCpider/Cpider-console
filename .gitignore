@@ -28,6 +28,9 @@ env/
 log/
 logs/
 
+# Local data
+/data/spider_console.db
+
 # Build artifacts
 build/
 dist/
