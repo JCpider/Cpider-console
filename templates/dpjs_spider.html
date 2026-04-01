@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}DPJS-Spider - Spider Console{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h2>DPJS-Spider</h2>
+    <p class="subtitle">在单页中配置 page_url、请求模板和变量，并通过浏览器环境执行 DPJS 抓取。</p>
+</section>
+
+<section id="dpjs-spider-page" class="dpjs-grid">
+    <div class="card">
+        <div class="card-header">
+            <h3>DPJS 配置</h3>
+            <span class="hint">page + request template</span>
+        </div>
+        <div class="card-body">
+            <form id="dpjs-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="dpjs-page-url">PAGE_URL</label>
+                        <input id="dpjs-page-url" type="text" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="dpjs-user-data-path">用户数据目录</label>
+                        <input id="dpjs-user-data-path" type="text" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="dpjs-proxy-url">代理</label>
+                        <input id="dpjs-proxy-url" type="text" placeholder="可留空">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label" for="dpjs-headless">
+                            <input id="dpjs-headless" type="checkbox">
+                            <span>启用 headless</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group dpjs-multi-request-toggle">
+                        <label class="checkbox-label" for="dpjs-multi-request">
+                            <input id="dpjs-multi-request" type="checkbox">
+                            <span>多次请求模式</span>
+                        </label>
+                        <p class="hint">启用后可配置请求休眠、数字循环和高级附加变量。</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="dpjs-request-template">request_template</label>
+                    <textarea id="dpjs-request-template" rows="1" class="code-text dpjs-one-line-textarea" wrap="off" required></textarea>
+                </div>
+
+                <div id="dpjs-multi-request-options" class="dpjs-advanced-section" hidden>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="dpjs-sleep-seconds">每次请求休眠秒数</label>
+                            <input id="dpjs-sleep-seconds" type="number" min="0" step="0.1" value="0">
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label" for="dpjs-loop-enabled">
+                                <input id="dpjs-loop-enabled" type="checkbox">
+                                <span>启用数字循环</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="dpjs-loop-variable-name">循环变量名</label>
+                            <input id="dpjs-loop-variable-name" type="text" value="page">
+                        </div>
+                        <div class="form-group">
+                            <label for="dpjs-loop-start">起始值</label>
+                            <input id="dpjs-loop-start" type="number" step="0.1" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="dpjs-loop-count">循环次数</label>
+                            <input id="dpjs-loop-count" type="number" min="1" step="1" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="dpjs-loop-step">每次递增值</label>
+                            <input id="dpjs-loop-step" type="number" step="0.1" value="1">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dpjs-request-variables">request_variables（高级附加变量 JSON）</label>
+                        <textarea id="dpjs-request-variables" rows="10" class="code-text"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button id="dpjs-save-btn" type="submit" class="btn btn-primary">保存配置</button>
+                    <button id="dpjs-run-btn" type="button" class="btn">立即运行</button>
+                    <span id="dpjs-form-result" class="form-result"></span>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="dpjs-side-panel">
+        <div class="card">
+            <div class="card-header">
+                <h3>当前任务</h3>
+                <span class="badge" id="task-status-badge">待命</span>
+            </div>
+            <div class="card-body">
+                <div class="task-status-panel dpjs-status-panel">
+                    <div class="task-status-item">
+                        <span class="task-status-label">任务 ID</span>
+                        <strong id="summary-current-task">-</strong>
+                    </div>
+                    <div class="task-status-item">
+                        <span class="task-status-label">目标 URL</span>
+                        <strong id="dpjs-current-target" class="dpjs-inline-scroll dpjs-drag-scroll">-</strong>
+                    </div>
+                    <div class="task-status-item">
+                        <span class="task-status-label">最近更新时间</span>
+                        <strong id="dpjs-updated-at">-</strong>
+                    </div>
+                    <div class="task-status-item">
+                        <span class="task-status-label">最近结果</span>
+                        <strong id="dpjs-result-summary">-</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>实时日志</h3>
+                <span class="hint">WebSocket</span>
+            </div>
+            <div class="card-body">
+                <pre id="log-console" class="log-console dpjs-log-console dpjs-drag-scroll">等待任务日志...</pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="card dpjs-result-card">
+    <div class="card-header dpjs-result-header">
+        <h3>任务结果</h3>
+        <span class="hint">result_json</span>
+    </div>
+    <div class="card-body">
+        <pre id="dpjs-result-json" class="log-console dpjs-result-console">等待任务结果...</pre>
+        <div class="dpjs-result-footer">
+            <div class="dpjs-result-actions">
+                <button id="dpjs-download-json" type="button" class="btn dpjs-download-btn" disabled>下载 JSON</button>
+                <button id="dpjs-download-txt" type="button" class="btn dpjs-download-btn" disabled>下载 TXT</button>
+            </div>
+            <div id="dpjs-result-pagination" class="dpjs-result-pagination" hidden>
+                <button id="dpjs-result-prev" type="button" class="btn">上一页</button>
+                <span id="dpjs-result-page-indicator" class="hint">第 1 / 1 页</span>
+                <button id="dpjs-result-next" type="button" class="btn">下一页</button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h3>最近任务</h3>
+        <span class="hint">最近 10 条 DPJS 任务</span>
+    </div>
+    <div class="card-body">
+        <div class="table-wrap">
+            <table class="data-table dpjs-tasks-table">
+                <thead>
+                    <tr>
+                        <th>任务 ID</th>
+                        <th>状态</th>
+                        <th>目标</th>
+                        <th>创建时间</th>
+                    </tr>
+                </thead>
+                <tbody id="dpjs-tasks-body">
+                    <tr>
+                        <td colspan="4" class="table-empty">暂无 DPJS 任务</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - Spider Console</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
+</head>
+<body>
+    <div class="container">
+        <div class="login-wrap">
+            <div class="card login-card">
+                <div class="card-header">
+                    <h3 class="login-title">访问验证</h3>
+                    <span class="hint">请输入访问密码继续</span>
+                </div>
+                <div class="card-body">
+                    <p class="login-subtitle">使用控制台访问密码登录 Spider Console。</p>
+                    {% if error %}
+                    <div class="login-error">{{ error }}</div>
+                    {% endif %}
+                    <form method="post" action="/login">
+                        <input type="hidden" name="next" value="{{ next }}">
+                        <div class="form-group">
+                            <label for="password">访问密码</label>
+                            <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary btn-block">登录</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

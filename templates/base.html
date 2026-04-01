@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Spider Console{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>{{ settings.app_name }}</h1>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link{% if active_page == 'dashboard' %} active{% endif %}">仪表盘</a>
+                <a href="/dpjs-spider" class="nav-link{% if active_page == 'dpjs-spider' %} active{% endif %}">DPJS-Spider</a>
+                <a href="/settings" class="nav-link{% if active_page == 'settings' %} active{% endif %}">设置</a>
+                <a href="/logout" class="nav-link">退出</a>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    <script src="/static/js/app.js?v={{ static_version }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

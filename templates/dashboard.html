@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}仪表盘 - Spider Console{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h2>仪表盘</h2>
+    <p class="subtitle">查看 Spider Console 当前配置、任务状态和最近执行记录。</p>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card stat-card-primary">
+        <span class="stat-label">总任务数</span>
+        <strong class="stat-value" id="summary-task-count">-</strong>
+    </div>
+    <div class="stat-card stat-card-info">
+        <span class="stat-label">运行中</span>
+        <strong class="stat-value" id="summary-running-task-count">-</strong>
+    </div>
+    <div class="stat-card stat-card-success">
+        <span class="stat-label">启用站点</span>
+        <strong class="stat-value" id="summary-enabled-site-count">-</strong>
+    </div>
+    <div class="stat-card stat-card-muted">
+        <span class="stat-label">服务器时间</span>
+        <strong class="stat-value stat-value-sm" id="summary-server-time">-</strong>
+    </div>
+</section>
+
+<section class="dashboard-grid">
+    <div class="card">
+        <div class="card-header">
+            <h3>任务控制台</h3>
+            <span class="badge" id="task-status-badge">待命</span>
+        </div>
+        <div class="card-body">
+            <div class="form-group">
+                <label for="demo-task-id">演示任务 ID</label>
+                <input id="demo-task-id" type="text" value="demo-task" placeholder="task id">
+            </div>
+            <div class="form-actions">
+                <button id="demo-task-btn" type="button" class="btn btn-primary">发送演示日志</button>
+            </div>
+            <div class="task-status-panel" id="summary-panel">
+                <div class="task-status-item">
+                    <span class="task-status-label">应用名</span>
+                    <strong id="summary-app-name">-</strong>
+                </div>
+                <div class="task-status-item">
+                    <span class="task-status-label">版本</span>
+                    <strong id="summary-app-version">-</strong>
+                </div>
+                <div class="task-status-item">
+                    <span class="task-status-label">调试模式</span>
+                    <strong id="summary-debug">-</strong>
+                </div>
+                <div class="task-status-item">
+                    <span class="task-status-label">当前任务</span>
+                    <strong id="summary-current-task">-</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>实时日志</h3>
+            <span class="hint">WebSocket</span>
+        </div>
+        <div class="card-body">
+            <pre id="log-console" class="log-console">等待任务日志...</pre>
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h3>最近任务</h3>
+        <span class="hint">最近 5 条</span>
+    </div>
+    <div class="card-body">
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>任务 ID</th>
+                        <th>类型</th>
+                        <th>状态</th>
+                        <th>目标</th>
+                        <th>创建时间</th>
+                    </tr>
+                </thead>
+                <tbody id="recent-tasks-body">
+                    <tr>
+                        <td colspan="5" class="table-empty">暂无任务记录</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}
