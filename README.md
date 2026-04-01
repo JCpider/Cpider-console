@@ -7,6 +7,7 @@
 - 基于 FastAPI 提供 Web 管理界面
 - 支持登录鉴权访问控制
 - 启动时自动初始化数据库与默认配置
+- 提供仪表盘、设置页、DPJS-Spider 页面和视频爬虫页面
 - 提供静态资源、模板页面和 WebSocket 路由
 - 集成 DrissionPage，适合浏览器自动化/爬虫相关场景
 
@@ -14,8 +15,7 @@
 
 ```text
 Cpider-console/
-├── main.py              # 启动入口
-├── webui.py             # 示例脚本/占位文件
+├── webui.py             # 当前启动入口
 ├── pyproject.toml       # 项目配置
 ├── requirements.txt     # 依赖列表
 ├── src/                 # 核心源码
@@ -51,16 +51,16 @@ pip install -e .
 
 ## 启动项目
 
-当前可用的启动方式：
+当前启动方式：
 
 ```bash
-python main.py
+python webui.py
 ```
 
 如果需要指定参数：
 
 ```bash
-python main.py --host 0.0.0.0 --port 8001 --debug --log-level INFO --access-password your_password
+python webui.py --host 0.0.0.0 --port 8001 --debug --log-level INFO --access-password your_password
 ```
 
 默认启动配置：
@@ -77,13 +77,22 @@ http://127.0.0.1:8001
 
 ## 启动参数
 
-`main.py` 当前支持以下命令行参数：
+`webui.py` 当前支持以下命令行参数：
 
 - `--host`：指定 Web UI 监听地址
 - `--port`：指定 Web UI 端口
 - `--debug`：开启调试模式
 - `--log-level`：指定日志级别
 - `--access-password`：设置 Web UI 访问密码
+
+## 页面说明
+
+当前 Web UI 主要包含以下页面：
+
+- `/`：仪表盘
+- `/settings`：设置页
+- `/dpjs-spider`：DPJS-Spider 页面
+- `/video-spider`：视频爬虫页面
 
 ## 环境变量
 
@@ -103,6 +112,10 @@ http://127.0.0.1:8001
 - `data/`：用于存放数据库等数据文件
 - `logs/`：用于存放日志文件
 
+默认本地数据库文件为：
+
+- `data/spider_console.db`
+
 ## 默认安全配置
 
 当前默认值适合本地开发，若要对外使用，建议至少修改：
@@ -112,5 +125,6 @@ http://127.0.0.1:8001
 
 ## 说明
 
-- `main.py` 是实际启动入口。
-- `webui.py` 当前是示例文件，不是主程序入口，也不能作为项目启动命令使用。
+- `webui.py` 是当前项目启动入口。
+- 项目会在启动时自动初始化数据库、日志目录和默认配置。
+- `.env`、日志文件和本地数据库文件不应提交到版本库。
