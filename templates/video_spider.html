@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}视频爬虫 - Spider Console{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h2>视频爬虫</h2>
+    <p class="subtitle">按当前控制台风格统一配置视频抓取参数，预览任务结果，并为后续接入真实视频采集流程预留结构。</p>
+</section>
+
+<section id="video-spider-page" class="dpjs-grid video-spider-grid">
+    <div class="card">
+        <div class="card-header">
+            <h3>视频抓取配置</h3>
+            <span class="hint">video task profile</span>
+        </div>
+        <div class="card-body">
+            <form id="video-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="video-page-url">视频 / 列表 URL</label>
+                        <input id="video-page-url" type="text" placeholder="https://example.com/video/123" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="video-platform">平台</label>
+                        <select id="video-platform">
+                            <option value="douyin">抖音</option>
+                            <option value="bilibili">Bilibili</option>
+                            <option value="kuaishou">快手</option>
+                            <option value="generic">通用站点</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="video-save-dir">保存目录</label>
+                        <input id="video-save-dir" type="text" placeholder="data/video-downloads">
+                    </div>
+                    <div class="form-group">
+                        <label for="video-max-count">最大抓取数量</label>
+                        <input id="video-max-count" type="number" min="1" step="1" value="20">
+                    </div>
+                    <div class="form-group">
+                        <label for="video-quality">期望清晰度</label>
+                        <select id="video-quality">
+                            <option value="source">原始</option>
+                            <option value="1080p">1080p</option>
+                            <option value="720p">720p</option>
+                            <option value="480p">480p</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="video-proxy-url">代理</label>
+                        <input id="video-proxy-url" type="text" placeholder="可留空">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label" for="video-download-media">
+                            <input id="video-download-media" type="checkbox" checked>
+                            <span>下载视频文件</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label" for="video-headless">
+                            <input id="video-headless" type="checkbox" checked>
+                            <span>启用 headless</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="video-extra-headers">附加请求头（JSON）</label>
+                    <textarea id="video-extra-headers" rows="6" class="code-text">{
+  "Referer": "",
+  "Cookie": ""
+}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="video-notes">任务说明</label>
+                    <textarea id="video-notes" rows="3" placeholder="可记录目标账号、采集用途或筛选条件"></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button id="video-save-btn" type="submit" class="btn btn-primary">保存配置</button>
+                    <button id="video-run-btn" type="button" class="btn">立即运行</button>
+                    <span id="video-form-result" class="form-result"></span>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="dpjs-side-panel">
+        <div class="card">
+            <div class="card-header">
+                <h3>当前任务</h3>
+                <span class="badge" id="video-task-status-badge">待命</span>
+            </div>
+            <div class="card-body">
+                <div class="task-status-panel dpjs-status-panel">
+                    <div class="task-status-item">
+                        <span class="task-status-label">任务 ID</span>
+                        <strong id="video-current-task">-</strong>
+                    </div>
+                    <div class="task-status-item">
+                        <span class="task-status-label">目标地址</span>
+                        <strong id="video-current-target" class="dpjs-inline-scroll dpjs-drag-scroll">-</strong>
+                    </div>
+                    <div class="task-status-item">
+                        <span class="task-status-label">最近更新时间</span>
+                        <strong id="video-updated-at">-</strong>
+                    </div>
+                    <div class="task-status-item">
+                        <span class="task-status-label">最近结果</span>
+                        <strong id="video-result-summary">-</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>实时日志</h3>
+                <span class="hint">placeholder</span>
+            </div>
+            <div class="card-body">
+                <pre id="video-log-console" class="log-console dpjs-log-console dpjs-drag-scroll">等待视频任务日志...</pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="card dpjs-result-card video-result-card">
+    <div class="card-header dpjs-result-header">
+        <h3>任务结果</h3>
+        <span class="hint">result preview</span>
+    </div>
+    <div class="card-body">
+        <pre id="video-result-json" class="log-console dpjs-result-console">等待任务结果...</pre>
+        <div class="dpjs-result-footer">
+            <div class="dpjs-result-actions">
+                <button id="video-copy-json" type="button" class="btn dpjs-download-btn">复制 JSON</button>
+                <button id="video-load-demo" type="button" class="btn dpjs-download-btn">载入示例结果</button>
+            </div>
+            <span id="video-result-hint" class="hint">当前为页面占位版，后续可接入真实接口与 WebSocket。</span>
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h3>最近任务</h3>
+        <span class="hint">最近 3 条示例视频任务</span>
+    </div>
+    <div class="card-body">
+        <div class="table-wrap">
+            <table class="data-table dpjs-tasks-table video-tasks-table">
+                <thead>
+                    <tr>
+                        <th>任务 ID</th>
+                        <th>状态</th>
+                        <th>目标</th>
+                        <th>创建时间</th>
+                    </tr>
+                </thead>
+                <tbody id="video-tasks-body">
+                    <tr>
+                        <td colspan="4" class="table-empty">暂无视频任务</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

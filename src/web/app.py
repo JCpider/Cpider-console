@@ -121,6 +121,12 @@ def create_app() -> FastAPI:
             return _redirect_to_login(request)
         return _render_template(request, "dpjs_spider.html", {"active_page": "dpjs-spider"})
 
+    @app.get("/video-spider", response_class=HTMLResponse)
+    async def video_spider_page(request: Request):
+        if not _is_authenticated(request):
+            return _redirect_to_login(request)
+        return _render_template(request, "video_spider.html", {"active_page": "video-spider"})
+
     @app.on_event("startup")
     async def startup_event():
         task_manager.set_loop(asyncio.get_event_loop())

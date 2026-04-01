@@ -664,6 +664,28 @@ button:hover {
     opacity: 0.7;
 }
 
+#video-run-btn.video-run-btn-active {
+    background: var(--warning-color);
+    color: #fff;
+}
+
+#video-run-btn.video-run-btn-active:hover {
+    background: #d97706;
+}
+
+#video-run-btn.video-run-btn-active:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.video-spider-grid .form-grid {
+    align-items: start;
+}
+
+.video-result-card .log-console {
+    min-height: 280px;
+}
+
 .dpjs-result-card {
     margin-bottom: var(--spacing-lg);
 }

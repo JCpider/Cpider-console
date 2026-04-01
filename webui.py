@@ -61,6 +61,9 @@ def setup_application():
 def start_webui():
     settings = setup_application()
 
+    logger = logging.getLogger(__name__)
+    logger.info("web ui listening on http://%s:%s", settings.webui_host, settings.webui_port)
+
     uvicorn.run(
         "src.web.app:app",
         host=settings.webui_host,

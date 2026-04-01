@@ -1,3 +1,14 @@
+function appendLogToElement(elementId, waitingText, message) {
+    const consoleEl = document.getElementById(elementId);
+    if (!consoleEl) return;
+    if (consoleEl.textContent === waitingText) {
+        consoleEl.textContent = message;
+    } else {
+        consoleEl.textContent += `\n${message}`;
+    }
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
 async function requestJson(url, options = {}) {
     const response = await fetch(url, {
         headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -11,14 +22,7 @@ async function requestJson(url, options = {}) {
 }
 
 function appendLog(message) {
-    const consoleEl = document.getElementById("log-console");
-    if (!consoleEl) return;
-    if (consoleEl.textContent === "等待任务日志...") {
-        consoleEl.textContent = message;
-    } else {
-        consoleEl.textContent += `\n${message}`;
-    }
-    consoleEl.scrollTop = consoleEl.scrollHeight;
+    appendLogToElement("log-console", "等待任务日志...", message);
 }
 
 function formatText(value, fallback = "-") {
@@ -154,8 +158,8 @@ function renderDpjsTasks(tasks) {
     initDpjsHorizontalDragScroll(body);
 }
 
-function updateTaskBadge(status, message) {
-    const badge = document.getElementById("task-status-badge");
+function updateTaskBadge(status, message, elementId = "task-status-badge") {
+    const badge = document.getElementById(elementId);
     if (!badge) return;
     const text = message ? `${status} · ${message}` : status;
     badge.className = badgeClass(status);
@@ -772,17 +776,275 @@ async function initDpjsSpider() {
     });
 }
 
+function renderVideoTasks(tasks) {
+    const body = document.getElementById("video-tasks-body");
+    if (!body) return;
+    if (!tasks || tasks.length === 0) {
+        body.innerHTML = `
+            <tr>
+                <td colspan="4" class="table-empty">暂无视频任务</td>
+            </tr>
+        `;
+        return;
+    }
+    body.innerHTML = tasks.map((task) => `
+        <tr data-task-id="${formatText(task.task_uuid, "")}" class="dpjs-task-row">
+            <td><span class="code-text dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_uuid)}</span></td>
+            <td><span class="${badgeClass(task.status)}">${formatText(task.status)}</span></td>
+            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.target_url)}</span></td>
+            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.created_at)}</span></td>
+        </tr>
+    `).join("");
+    initDpjsHorizontalDragScroll(body);
+}
+
+function renderVideoResult(task) {
+    const resultEl = document.getElementById("video-result-json");
+    const summaryEl = document.getElementById("video-result-summary");
+    const targetEl = document.getElementById("video-current-target");
+    const updatedEl = document.getElementById("video-updated-at");
+    const currentTaskEl = document.getElementById("video-current-task");
+    if (!resultEl || !summaryEl || !targetEl || !updatedEl || !currentTaskEl) return;
+
+    if (!task) {
+        currentTaskEl.textContent = "-";
+        targetEl.textContent = "-";
+        updatedEl.textContent = "-";
+        summaryEl.textContent = "-";
+        resultEl.textContent = "等待任务结果...";
+        updateTaskBadge("待命", "", "video-task-status-badge");
+        return;
+    }
+
+    currentTaskEl.textContent = formatText(task.task_uuid);
+    targetEl.textContent = formatText(task.target_url);
+    updatedEl.textContent = formatText(task.updated_at || task.created_at);
+    summaryEl.textContent = formatText(task.summary || task.status);
+    resultEl.textContent = JSON.stringify(task.result_json || {}, null, 2);
+    updateTaskBadge(task.status || "待命", task.message || "", "video-task-status-badge");
+}
+
+function buildVideoPayload() {
+    return {
+        page_url: document.getElementById("video-page-url").value,
+        platform: document.getElementById("video-platform").value,
+        save_dir: document.getElementById("video-save-dir").value,
+        max_count: Number(document.getElementById("video-max-count").value || 0),
+        quality: document.getElementById("video-quality").value,
+        proxy_url: document.getElementById("video-proxy-url").value || null,
+        download_media: document.getElementById("video-download-media").checked,
+        headless: document.getElementById("video-headless").checked,
+        extra_headers: parseJsonField(document.getElementById("video-extra-headers").value, {}),
+        notes: document.getElementById("video-notes").value,
+    };
+}
+
+function setVideoConfig(config) {
+    document.getElementById("video-page-url").value = formatText(config.page_url, "");
+    document.getElementById("video-platform").value = formatText(config.platform, "douyin");
+    document.getElementById("video-save-dir").value = formatText(config.save_dir, "data/video-downloads");
+    document.getElementById("video-max-count").value = Number(config.max_count || 20);
+    document.getElementById("video-quality").value = formatText(config.quality, "source");
+    document.getElementById("video-proxy-url").value = formatText(config.proxy_url, "");
+    document.getElementById("video-download-media").checked = config.download_media !== false;
+    document.getElementById("video-headless").checked = config.headless !== false;
+    document.getElementById("video-extra-headers").value = JSON.stringify(config.extra_headers || { Referer: "", Cookie: "" }, null, 2);
+    document.getElementById("video-notes").value = formatText(config.notes, "");
+}
+
+function syncVideoRunButton(task, isRunning = false) {
+    const runBtn = document.getElementById("video-run-btn");
+    if (!runBtn) return;
+    const running = isRunning || ["pending", "running"].includes(String(task?.status || "").toLowerCase());
+    runBtn.classList.toggle("video-run-btn-active", running);
+    runBtn.textContent = running ? "运行中（占位）" : "立即运行";
+}
+
+async function copyVideoResult() {
+    const content = document.getElementById("video-result-json")?.textContent || "";
+    if (!content) throw new Error("当前没有可复制的结果");
+    if (!navigator.clipboard?.writeText) {
+        throw new Error("当前浏览器不支持剪贴板写入");
+    }
+    await navigator.clipboard.writeText(content);
+}
+
+async function initVideoSpider() {
+    const page = document.getElementById("video-spider-page");
+    if (!page) return;
+
+    const form = document.getElementById("video-form");
+    const result = document.getElementById("video-form-result");
+    const runBtn = document.getElementById("video-run-btn");
+    const copyBtn = document.getElementById("video-copy-json");
+    const demoBtn = document.getElementById("video-load-demo");
+    const resultHint = document.getElementById("video-result-hint");
+
+    const sampleConfig = {
+        page_url: "https://example.com/channel/demo",
+        platform: "bilibili",
+        save_dir: "data/video-downloads",
+        max_count: 20,
+        quality: "1080p",
+        proxy_url: "",
+        download_media: true,
+        headless: true,
+        extra_headers: { Referer: "", Cookie: "" },
+        notes: "示例任务：抓取最近更新的视频列表",
+    };
+
+    const sampleTasks = [
+        {
+            task_uuid: "video-demo-20260402-001",
+            status: "completed",
+            target_url: "https://example.com/channel/demo",
+            created_at: "2026-04-02 10:15:00",
+            updated_at: "2026-04-02 10:18:12",
+            summary: "抓取 12 条视频，成功下载 8 条",
+            result_json: {
+                platform: "bilibili",
+                request_count: 12,
+                download_count: 8,
+                videos: [
+                    { title: "示例视频 A", duration: "03:12", quality: "1080p", author: "demo-up" },
+                    { title: "示例视频 B", duration: "08:45", quality: "720p", author: "demo-up" }
+                ]
+            }
+        },
+        {
+            task_uuid: "video-demo-20260401-002",
+            status: "running",
+            target_url: "https://example.com/video/next",
+            created_at: "2026-04-01 18:00:00",
+            updated_at: "2026-04-01 18:02:31",
+            summary: "正在解析播放地址",
+            message: "解析第 3 个视频页面",
+            result_json: {
+                platform: "douyin",
+                progress: "3 / 10"
+            }
+        },
+        {
+            task_uuid: "video-demo-20260331-003",
+            status: "failed",
+            target_url: "https://example.com/private/list",
+            created_at: "2026-03-31 21:40:00",
+            updated_at: "2026-03-31 21:41:22",
+            summary: "Cookie 失效，任务中断",
+            message: "请求被平台风控拦截",
+            result_json: {
+                error: "Cookie expired"
+            }
+        }
+    ];
+
+    let currentTask = sampleTasks[0];
+    setVideoConfig(sampleConfig);
+    renderVideoTasks(sampleTasks);
+    renderVideoResult(currentTask);
+    syncVideoRunButton(currentTask);
+    initDpjsHorizontalDragScroll(page);
+    appendLogToElement("video-log-console", "等待视频任务日志...", "[system] 视频爬虫页面已加载，当前为占位版。");
+    appendLogToElement("video-log-console", "等待视频任务日志...", "[hint] 后续可接入真实 /api/video/* 接口和任务 WebSocket。");
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        result.textContent = "已保存占位配置";
+        result.className = "form-result success";
+        appendLogToElement("video-log-console", "等待视频任务日志...", `[config] 已更新视频任务配置: ${buildVideoPayload().platform}`);
+    });
+
+    runBtn.addEventListener("click", async () => {
+        const payload = buildVideoPayload();
+        currentTask = {
+            task_uuid: `video-demo-${Date.now()}`,
+            status: "running",
+            target_url: payload.page_url,
+            created_at: new Date().toLocaleString("zh-CN", { hour12: false }),
+            updated_at: new Date().toLocaleString("zh-CN", { hour12: false }),
+            summary: "页面占位版：已生成模拟任务",
+            message: "尚未接入真实后端",
+            result_json: {
+                platform: payload.platform,
+                max_count: payload.max_count,
+                quality: payload.quality,
+                download_media: payload.download_media,
+                save_dir: payload.save_dir,
+                note: "当前页面只提供 UI 结构与占位交互。"
+            }
+        };
+        syncVideoRunButton(currentTask, true);
+        renderVideoResult(currentTask);
+        result.textContent = "已生成占位任务";
+        result.className = "form-result success";
+        resultHint.textContent = "当前展示的是模拟任务结果，后续可无缝切换到真实接口。";
+        appendLogToElement("video-log-console", "等待视频任务日志...", `[run] 已创建占位任务 ${currentTask.task_uuid}`);
+        appendLogToElement("video-log-console", "等待视频任务日志...", `[run] 目标地址: ${payload.page_url || "-"}`);
+        window.setTimeout(() => {
+            currentTask = {
+                ...currentTask,
+                status: "completed",
+                updated_at: new Date().toLocaleString("zh-CN", { hour12: false }),
+                summary: "页面占位版：模拟任务已完成",
+                result_json: {
+                    ...currentTask.result_json,
+                    finished: true,
+                    preview_items: [
+                        { title: "示例视频 1", status: "downloaded" },
+                        { title: "示例视频 2", status: "metadata-only" }
+                    ]
+                }
+            };
+            syncVideoRunButton(currentTask);
+            renderVideoResult(currentTask);
+            appendLogToElement("video-log-console", "等待视频任务日志...", `[status] completed - ${currentTask.summary}`);
+        }, 800);
+    });
+
+    copyBtn?.addEventListener("click", async () => {
+        try {
+            await copyVideoResult();
+            result.textContent = "结果 JSON 已复制";
+            result.className = "form-result success";
+        } catch (error) {
+            result.textContent = error.message;
+            result.className = "form-result error";
+        }
+    });
+
+    demoBtn?.addEventListener("click", () => {
+        currentTask = sampleTasks[0];
+        renderVideoResult(currentTask);
+        syncVideoRunButton(currentTask);
+        appendLogToElement("video-log-console", "等待视频任务日志...", `[demo] 已载入示例任务 ${currentTask.task_uuid}`);
+    });
+
+    document.getElementById("video-tasks-body")?.addEventListener("click", (event) => {
+        const row = event.target.closest("tr[data-task-id]");
+        if (!row) return;
+        const taskId = row.dataset.taskId;
+        const task = sampleTasks.find((item) => item.task_uuid === taskId);
+        if (!task) return;
+        currentTask = task;
+        renderVideoResult(task);
+        syncVideoRunButton(task);
+        appendLogToElement("video-log-console", "等待视频任务日志...", `[select] 切换到任务 ${task.task_uuid}`);
+    });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         await initDashboard();
         await initSettings();
         await initDpjsSpider();
+        await initVideoSpider();
     } catch (error) {
         appendLog(`[error] ${error.message}`);
-        const result = document.getElementById("settings-result") || document.getElementById("dpjs-form-result");
+        const result = document.getElementById("settings-result") || document.getElementById("dpjs-form-result") || document.getElementById("video-form-result");
         if (result) {
             result.textContent = error.message;
             result.className = "form-result error";
         }
     }
 });
+
