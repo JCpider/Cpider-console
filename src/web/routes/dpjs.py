@@ -30,6 +30,11 @@ class RequestTemplatePayload(BaseModel):
     json_body: dict | list | str | int | float | bool | None = Field(default=None, alias="json")
 
 
+class ResultParserPayload(BaseModel):
+    enabled: bool = False
+    code: str = ""
+
+
 class DpjsConfigPayload(BaseModel):
     page_url: str
     user_data_path: str | None = None
@@ -44,6 +49,7 @@ class DpjsConfigPayload(BaseModel):
     loop_step: float = 1
     request_template: RequestTemplatePayload
     request_variables: list[dict] = []
+    result_parser: ResultParserPayload = ResultParserPayload()
 
 
 @router.get("")

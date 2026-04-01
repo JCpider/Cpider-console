@@ -1,5 +1,6 @@
 import contextlib
 import importlib.util
+import json
 import threading
 import time
 from copy import deepcopy
@@ -13,6 +14,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DPJS_ROOT = _PROJECT_ROOT / "dpjs"
 _STANDALONE_MODULE_PATH = _DPJS_ROOT / "standalone_dpjs_downloader.py"
 _DEFAULT_USER_DATA_PATH = _DPJS_ROOT / "google_user_data"
+_DEFAULT_PARSER_CODE = """def parse(response):
+    data = response.json()
+    return {
+        \"items\": data.get(\"items\", []) if isinstance(data, dict) else data
+    }
+"""
 
 _module_lock = threading.Lock()
 _standalone_module = None
@@ -38,6 +45,10 @@ DEFAULT_DPJS_CONFIG = {
         "json": None,
     },
     "request_variables": [{"page": 2}],
+    "result_parser": {
+        "enabled": False,
+        "code": _DEFAULT_PARSER_CODE,
+    },
 }
 
 
@@ -48,6 +59,29 @@ class SafeDict(dict):
 
 class DpjsTaskCancelled(Exception):
     pass
+
+
+class DpjsResponseAdapter:
+    def __init__(self, result: dict[str, Any]):
+        self.status_code = result.get("status_code")
+        self.url = result.get("url")
+        self.reason = result.get("reason")
+        self.rt = result.get("rt")
+        self._body_type = result.get("body_type")
+        self._body = result.get("body")
+
+    @property
+    def text(self) -> str:
+        if self._body_type == "text":
+            return self._body if isinstance(self._body, str) else json.dumps(self._body, ensure_ascii=False, indent=2)
+        return json.dumps(self._body, ensure_ascii=False, indent=2)
+
+    def json(self) -> Any:
+        if self._body_type == "json":
+            return deepcopy(self._body)
+        if isinstance(self._body, str):
+            return json.loads(self._body)
+        return deepcopy(self._body)
 
 
 def get_default_dpjs_config() -> dict[str, Any]:
@@ -102,6 +136,18 @@ def has_placeholders(value: Any) -> bool:
     return False
 
 
+def _normalize_result_parser(value: dict[str, Any] | None) -> dict[str, Any]:
+    default_parser = deepcopy(DEFAULT_DPJS_CONFIG["result_parser"])
+    incoming = value or {}
+    code = incoming.get("code")
+    if not isinstance(code, str) or not code.strip():
+        code = default_parser["code"]
+    return {
+        "enabled": bool(incoming.get("enabled", default_parser["enabled"])),
+        "code": code,
+    }
+
+
 def normalize_dpjs_config(config: dict[str, Any] | None) -> dict[str, Any]:
     merged = get_default_dpjs_config()
     incoming = config or {}
@@ -117,6 +163,7 @@ def normalize_dpjs_config(config: dict[str, Any] | None) -> dict[str, Any]:
         "loop_start": float(incoming.get("loop_start", merged["loop_start"]) or 0),
         "loop_count": max(1, int(incoming.get("loop_count", merged["loop_count"]) or 1)),
         "loop_step": float(incoming.get("loop_step", merged["loop_step"]) or 0),
+        "result_parser": _normalize_result_parser(incoming.get("result_parser")),
     })
 
     request_template = deepcopy(merged["request_template"])
@@ -200,6 +247,43 @@ def _response_payload(response) -> dict[str, Any]:
     }
 
 
+def _coerce_items(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return [value]
+
+
+def _execute_parser_code(result: dict[str, Any], parser_config: dict[str, Any]) -> dict[str, Any]:
+    code = str(parser_config.get("code") or "").strip()
+    if not code:
+        raise ValueError("parser code is empty")
+
+    namespace: dict[str, Any] = {}
+    exec(code, {"__builtins__": __builtins__}, namespace)
+    parse_func = namespace.get("parse")
+    if not callable(parse_func):
+        raise ValueError("parser code must define parse(response)")
+
+    response = DpjsResponseAdapter(result)
+    parsed_result = parse_func(response)
+    items = []
+    if isinstance(parsed_result, dict) and "items" in parsed_result:
+        items = _coerce_items(parsed_result.get("items"))
+    else:
+        items = _coerce_items(parsed_result)
+
+    return {
+        "ok": True,
+        "item_count": len(items),
+        "items": items,
+        "error": None,
+    }
+
+
 def _raise_if_cancel_requested(task_id: str, request_template: dict[str, Any], site_id: int | None = None) -> None:
     if not task_manager.is_cancel_requested(task_id):
         return
@@ -230,6 +314,7 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
     request_cls = module.StandaloneRequest
     normalized = normalize_dpjs_config(config)
     request_template = normalized["request_template"]
+    parser_config = normalized.get("result_parser") or {}
     downloader = None
     try:
         task_manager.update_status(
@@ -259,6 +344,8 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
         variables_list = iter_request_variables(normalized)
         sleep_seconds = normalized.get("sleep_seconds", 0)
         results = []
+        parsed_items = {}
+        total_item_count = 0
         total = len(variables_list)
         for index, variables in enumerate(variables_list, start=1):
             _raise_if_cancel_requested(task_id, request_template, site_id=site_id)
@@ -290,6 +377,17 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
                 "variables": variables,
                 **_response_payload(response),
             }
+            if parser_config.get("enabled"):
+                try:
+                    parsed = _execute_parser_code(result, parser_config)
+                    parsed_items[str(index)] = parsed["items"]
+                    total_item_count += parsed["item_count"]
+                    result["parsed"] = parsed
+                    task_manager.add_log(task_id, f"[dpjs][parse] request {index}/{total}: {parsed['item_count']} items parsed")
+                except Exception as exc:
+                    parsed_items[str(index)] = []
+                    result["parsed"] = {"ok": False, "item_count": 0, "items": [], "error": str(exc)}
+                    task_manager.add_log(task_id, f"[dpjs][parse][error] request {index}/{total}: {exc}", level="error")
             results.append(result)
             task_manager.add_log(
                 task_id,
@@ -310,6 +408,12 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
                 "count": normalized.get("loop_count"),
                 "step": normalized.get("loop_step"),
             },
+            "parser": {
+                "enabled": parser_config.get("enabled", False),
+                "code": parser_config.get("code", ""),
+            },
+            "items": parsed_items,
+            "item_count": total_item_count,
             "request_count": len(results),
             "results": results,
         }

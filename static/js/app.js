@@ -26,6 +26,15 @@ function formatText(value, fallback = "-") {
     return String(value);
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
 function bindDpjsDragScroll(element) {
     if (!element || element.dataset.dragScrollBound === "1") return;
 
@@ -111,13 +120,14 @@ function renderRecentTasks(tasks) {
     }
     body.innerHTML = tasks.map((task) => `
         <tr>
-            <td class="code-text">${formatText(task.task_uuid)}</td>
-            <td>${formatText(task.task_type)}</td>
+            <td><span class="code-text dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_uuid)}</span></td>
+            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_type)}</span></td>
             <td><span class="${badgeClass(task.status)}">${formatText(task.status)}</span></td>
-            <td>${formatText(task.target_url)}</td>
-            <td>${formatText(task.created_at)}</td>
+            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.target_url)}</span></td>
+            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.created_at)}</span></td>
         </tr>
     `).join("");
+    initDpjsHorizontalDragScroll(body);
 }
 
 function renderDpjsTasks(tasks) {
@@ -277,31 +287,80 @@ function parseJsonField(value, fallback) {
 }
 
 function formatDpjsTemplateText(value) {
-    const raw = typeof value === "string" ? value : JSON.stringify(value || {});
-    let inString = false;
-    let escaped = false;
-    let formatted = "";
+    const formatParsedJson = (parsedValue) => {
+        const formatted = JSON.stringify(parsedValue, null, 2);
+        if (formatted === "{}") return "{\n}";
+        if (formatted === "[]") return "[\n]";
+        return formatted;
+    };
 
-    for (const char of raw) {
-        formatted += char;
-        if (escaped) {
-            escaped = false;
-            continue;
-        }
-        if (char === "\\" && inString) {
-            escaped = true;
-            continue;
-        }
-        if (char === "\"") {
-            inString = !inString;
-            continue;
-        }
-        if (char === "," && !inString) {
-            formatted += "\n";
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return "{\n}";
+        try {
+            return formatParsedJson(JSON.parse(trimmed));
+        } catch {
+            return value;
         }
     }
+    return formatParsedJson(value || {});
+}
 
-    return formatted;
+function getDefaultDpjsParserField() {
+    return { name: "", path: "" };
+}
+
+function normalizeDpjsParserConfig(parser) {
+    return {
+        enabled: !!parser?.enabled,
+        code: formatText(parser?.code, "def parse(response):\n    data = response.json()\n    return {\n        \"items\": data.get(\"items\", []) if isinstance(data, dict) else data\n    }")
+    };
+}
+
+function renderDpjsParsedResult(task, pageIndex = 0) {
+    const parsedEl = document.getElementById("dpjs-parsed-json");
+    const summaryEl = document.getElementById("dpjs-parsed-summary");
+    if (!parsedEl || !summaryEl) return;
+
+    if (!task) {
+        parsedEl.textContent = "等待解析结果...";
+        summaryEl.textContent = "-";
+        return;
+    }
+
+    const resultJson = task.result_json || {};
+    const parser = resultJson.parser || {};
+    if (!parser.enabled) {
+        parsedEl.textContent = "未启用结果解析";
+        summaryEl.textContent = "parser disabled";
+        return;
+    }
+
+    const results = Array.isArray(resultJson.results) ? resultJson.results : [];
+    const currentIndex = Math.max(0, pageIndex);
+    const currentResult = results[currentIndex] || null;
+    const parsed = currentResult?.parsed || null;
+    const itemsMap = resultJson.items && typeof resultJson.items === "object" ? resultJson.items : {};
+    const pageItems = Array.isArray(itemsMap[String(currentIndex + 1)]) ? itemsMap[String(currentIndex + 1)] : [];
+
+    parsedEl.textContent = JSON.stringify({
+        parser: {
+            enabled: !!parser.enabled,
+            code: formatText(parser.code, ""),
+        },
+        current_page: currentIndex + 1,
+        item_count: pageItems.length,
+        parsed: parsed || {
+            ok: true,
+            item_count: pageItems.length,
+            items: pageItems,
+            error: null,
+        },
+    }, null, 2);
+
+    const totalItems = Number(resultJson.item_count || 0);
+    const parsedStatus = parsed?.ok === false ? ` · error: ${formatText(parsed.error)}` : "";
+    summaryEl.textContent = `python parser · total ${totalItems} items · current ${pageItems.length} items${parsedStatus}`;
 }
 
 function buildDpjsPayload() {
@@ -319,6 +378,10 @@ function buildDpjsPayload() {
         loop_step: Number(document.getElementById("dpjs-loop-step").value || 0),
         request_template: parseJsonField(document.getElementById("dpjs-request-template").value, {}),
         request_variables: parseJsonField(document.getElementById("dpjs-request-variables").value, []),
+        result_parser: {
+            enabled: document.getElementById("dpjs-parser-enabled").checked,
+            code: document.getElementById("dpjs-parser-code").value,
+        },
     };
 }
 
@@ -336,6 +399,9 @@ function setDpjsConfig(config) {
     document.getElementById("dpjs-loop-step").value = Number(config.loop_step || 0);
     document.getElementById("dpjs-request-template").value = formatDpjsTemplateText(config.request_template || {});
     document.getElementById("dpjs-request-variables").value = JSON.stringify(config.request_variables || [], null, 2);
+    const parserConfig = normalizeDpjsParserConfig(config.result_parser || {});
+    document.getElementById("dpjs-parser-enabled").checked = parserConfig.enabled;
+    document.getElementById("dpjs-parser-code").value = parserConfig.code;
 }
 
 function toggleDpjsMultiRequestOptions() {
@@ -405,7 +471,9 @@ function downloadDpjsResult(task, format) {
     }
 
     const resultPreview = document.getElementById("dpjs-result-json")?.textContent || "";
+    const parsedPreview = document.getElementById("dpjs-parsed-json")?.textContent || "";
     const summary = document.getElementById("dpjs-result-summary")?.textContent || "-";
+    const parsedSummary = document.getElementById("dpjs-parsed-summary")?.textContent || "-";
     const content = [
         `任务 ID: ${formatText(task.task_uuid)}`,
         `状态: ${formatText(task.status)}`,
@@ -413,10 +481,14 @@ function downloadDpjsResult(task, format) {
         `创建时间: ${formatText(task.created_at)}`,
         `最近更新时间: ${formatText(task.updated_at || task.completed_at || task.started_at)}`,
         `结果摘要: ${summary}`,
+        `解析摘要: ${parsedSummary}`,
         task.error_message ? `错误信息: ${task.error_message}` : null,
         "",
         "结果内容:",
         resultPreview,
+        "",
+        "解析结果:",
+        parsedPreview,
     ].filter((line) => line !== null).join("\n");
     triggerBrowserDownload(
         buildDpjsDownloadFilename(task, "txt"),
@@ -443,15 +515,17 @@ function renderDpjsResult(task, pageIndex = 0) {
         paginationEl.hidden = true;
         resultEl.textContent = "等待任务结果...";
         summaryEl.textContent = "-";
+        renderDpjsParsedResult(null, 0);
         updateDpjsDownloadButtons(null);
         return;
     }
 
+    let currentIndex = Math.max(0, pageIndex);
     if (task.result_json && Object.keys(task.result_json).length > 0) {
         const results = Array.isArray(task.result_json.results) ? task.result_json.results : [];
         const requestCount = Number(task.result_json.request_count || results.length || 0);
         if (results.length > 0) {
-            const currentIndex = Math.min(Math.max(pageIndex, 0), results.length - 1);
+            currentIndex = Math.min(currentIndex, results.length - 1);
             const currentResult = results[currentIndex];
             const loopInfo = task.result_json.loop || {};
             paginationEl.hidden = results.length <= 1;
@@ -464,6 +538,7 @@ function renderDpjsResult(task, pageIndex = 0) {
                 multi_request: task.result_json.multi_request,
                 sleep_seconds: task.result_json.sleep_seconds,
                 loop: loopInfo,
+                parser: task.result_json.parser || {},
                 request_count: requestCount,
                 current_page: currentIndex + 1,
                 result: currentResult,
@@ -490,6 +565,7 @@ function renderDpjsResult(task, pageIndex = 0) {
         summaryEl.textContent = formatText(task.status);
     }
 
+    renderDpjsParsedResult(task, Number(resultEl.dataset.pageIndex || currentIndex || 0));
     updateDpjsDownloadButtons(task);
 }
 
@@ -520,6 +596,8 @@ async function initDpjsSpider() {
     const prevBtn = document.getElementById("dpjs-result-prev");
     const nextBtn = document.getElementById("dpjs-result-next");
     const multiRequestToggle = document.getElementById("dpjs-multi-request");
+    const parserAddFieldBtn = document.getElementById("dpjs-parser-add-field");
+    const parserFields = document.getElementById("dpjs-parser-fields");
     const downloadJsonBtn = document.getElementById("dpjs-download-json");
     const downloadTxtBtn = document.getElementById("dpjs-download-txt");
     let socket = null;
@@ -554,12 +632,29 @@ async function initDpjsSpider() {
         renderDpjsResult(currentTask);
         syncDpjsRunButton(currentTask, isSubmittingStop);
     } else {
+        renderDpjsParsedResult(null, 0);
         updateDpjsDownloadButtons(null);
         syncDpjsRunButton(null, isSubmittingStop);
     }
 
     multiRequestToggle?.addEventListener("change", () => {
         toggleDpjsMultiRequestOptions();
+    });
+
+    parserAddFieldBtn?.addEventListener("click", () => {
+        const nextFields = [...collectDpjsParserFields(), getDefaultDpjsParserField()];
+        renderDpjsParserFields(nextFields);
+    });
+
+    parserFields?.addEventListener("click", (event) => {
+        const removeBtn = event.target.closest(".dpjs-parser-remove-field");
+        if (!removeBtn) return;
+        const row = removeBtn.closest(".dpjs-parser-field-row");
+        if (!row) return;
+        const fields = collectDpjsParserFields();
+        const index = Number(row.dataset.fieldIndex || -1);
+        const nextFields = fields.filter((_, fieldIndex) => fieldIndex !== index);
+        renderDpjsParserFields(nextFields.length > 0 ? nextFields : [getDefaultDpjsParserField()]);
     });
 
     downloadJsonBtn?.addEventListener("click", () => {
@@ -575,13 +670,14 @@ async function initDpjsSpider() {
         result.textContent = "保存中...";
         result.className = "form-result";
         try {
+            const payload = buildDpjsPayload();
             const saveResult = await requestJson("/api/dpjs/config", {
                 method: "PUT",
-                body: JSON.stringify(buildDpjsPayload()),
+                body: JSON.stringify(payload),
             });
             result.textContent = saveResult.ok ? "DPJS 配置已保存" : "保存失败";
             result.className = `form-result ${saveResult.ok ? "success" : "error"}`;
-            setDpjsConfig(saveResult.config || buildDpjsPayload());
+            setDpjsConfig(saveResult.config || payload);
             toggleDpjsMultiRequestOptions();
         } catch (error) {
             result.textContent = error.message;

@@ -16,10 +16,27 @@
         </div>
         <div class="card-body">
             <form id="dpjs-form">
-                <div class="form-grid">
+                <div class="form-grid dpjs-config-grid">
                     <div class="form-group">
                         <label for="dpjs-page-url">PAGE_URL</label>
                         <input id="dpjs-page-url" type="text" required>
+                    </div>
+                    <div class="form-group dpjs-toggle-group">
+                        <div class="dpjs-toggle-row">
+                            <div class="form-group checkbox-group dpjs-toggle-item">
+                                <label class="checkbox-label" for="dpjs-headless">
+                                    <input id="dpjs-headless" type="checkbox">
+                                    <span>启用 headless</span>
+                                </label>
+                            </div>
+                            <div class="form-group checkbox-group dpjs-multi-request-toggle dpjs-toggle-item">
+                                <label class="checkbox-label" for="dpjs-multi-request">
+                                    <input id="dpjs-multi-request" type="checkbox">
+                                    <span>多次请求模式</span>
+                                </label>
+                                <p class="hint">启用后可配置请求休眠、数字循环和高级附加变量。</p>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="dpjs-user-data-path">用户数据目录</label>
@@ -28,19 +45,6 @@
                     <div class="form-group">
                         <label for="dpjs-proxy-url">代理</label>
                         <input id="dpjs-proxy-url" type="text" placeholder="可留空">
-                    </div>
-                    <div class="form-group checkbox-group">
-                        <label class="checkbox-label" for="dpjs-headless">
-                            <input id="dpjs-headless" type="checkbox">
-                            <span>启用 headless</span>
-                        </label>
-                    </div>
-                    <div class="form-group checkbox-group dpjs-multi-request-toggle">
-                        <label class="checkbox-label" for="dpjs-multi-request">
-                            <input id="dpjs-multi-request" type="checkbox">
-                            <span>多次请求模式</span>
-                        </label>
-                        <p class="hint">启用后可配置请求休眠、数字循环和高级附加变量。</p>
                     </div>
                 </div>
 
@@ -85,6 +89,21 @@
                     </div>
                 </div>
 
+                <div class="dpjs-advanced-section dpjs-parser-section">
+                    <div class="dpjs-parser-header">
+                        <label class="checkbox-label" for="dpjs-parser-enabled">
+                            <input id="dpjs-parser-enabled" type="checkbox">
+                            <span>启用结果解析</span>
+                        </label>
+                        <span class="hint">编写 Python 提取代码，可使用 response.json() 和 response.text</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="dpjs-parser-code">解析代码</label>
+                        <textarea id="dpjs-parser-code" rows="14" class="code-text dpjs-parser-code" spellcheck="false"></textarea>
+                        <p class="hint">定义 parse(response) 函数，并返回 items 列表或 {"items": [...]}。示例：data = response.json() / html = response.text</p>
+                    </div>
+                </div>
+
                 <div class="form-actions">
                     <button id="dpjs-save-btn" type="submit" class="btn btn-primary">保存配置</button>
                     <button id="dpjs-run-btn" type="button" class="btn">立即运行</button>
@@ -108,7 +127,7 @@
                     </div>
                     <div class="task-status-item">
                         <span class="task-status-label">目标 URL</span>
-                        <strong id="dpjs-current-target" class="dpjs-inline-scroll dpjs-drag-scroll">-</strong>
+                        <strong id="dpjs-current-target" class="dpjs-current-target dpjs-drag-scroll">-</strong>
                     </div>
                     <div class="task-status-item">
                         <span class="task-status-label">最近更新时间</span>
@@ -151,6 +170,19 @@
                 <span id="dpjs-result-page-indicator" class="hint">第 1 / 1 页</span>
                 <button id="dpjs-result-next" type="button" class="btn">下一页</button>
             </div>
+        </div>
+    </div>
+</section>
+
+<section class="card dpjs-result-card">
+    <div class="card-header dpjs-result-header">
+        <h3>解析结果</h3>
+        <span class="hint">items</span>
+    </div>
+    <div class="card-body">
+        <pre id="dpjs-parsed-json" class="log-console dpjs-result-console">等待解析结果...</pre>
+        <div class="dpjs-result-footer">
+            <span id="dpjs-parsed-summary" class="hint">-</span>
         </div>
     </div>
 </section>
