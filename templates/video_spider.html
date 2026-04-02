@@ -5,7 +5,7 @@
 {% block content %}
 <section class="page-header">
     <h2>视频爬虫</h2>
-    <p class="subtitle">按当前控制台风格统一配置视频抓取参数，预览任务结果，并为后续接入真实视频采集流程预留结构。</p>
+    <p class="subtitle">按当前控制台风格统一配置视频抓取参数，预览任务结果，并通过自定义解析规则采集视频元数据。</p>
 </section>
 
 <section id="video-spider-page" class="dpjs-grid video-spider-grid">
@@ -19,16 +19,17 @@
                 <div class="form-grid">
                     <div class="form-group">
                         <label for="video-page-url">视频 / 列表 URL</label>
-                        <input id="video-page-url" type="text" placeholder="https://example.com/video/123" required>
+                        <input id="video-page-url" type="text" placeholder="https://www.bilibili.com/video/BV..." required>
                     </div>
                     <div class="form-group">
                         <label for="video-platform">平台</label>
                         <select id="video-platform">
-                            <option value="douyin">抖音</option>
-                            <option value="bilibili">Bilibili</option>
-                            <option value="kuaishou">快手</option>
-                            <option value="generic">通用站点</option>
+                            <option value="video:bilibili">Bilibili</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="video-platform-custom">自定义平台标识（可选）</label>
+                        <input id="video-platform-custom" type="text" placeholder="默认 bilibili，留空即可">
                     </div>
                     <div class="form-group">
                         <label for="video-save-dir">保存目录</label>
@@ -36,7 +37,7 @@
                     </div>
                     <div class="form-group">
                         <label for="video-max-count">最大抓取数量</label>
-                        <input id="video-max-count" type="number" min="1" step="1" value="20">
+                        <input id="video-max-count" type="number" min="1" step="1" value="1">
                     </div>
                     <div class="form-group">
                         <label for="video-quality">期望清晰度</label>
@@ -66,16 +67,39 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="video-extra-headers">附加请求头（JSON）</label>
+                    <label for="video-extra-headers">附加请求头（JSON，可不填 Cookie）</label>
                     <textarea id="video-extra-headers" rows="6" class="code-text">{
   "Referer": "",
   "Cookie": ""
 }</textarea>
                 </div>
 
+                <div class="form-group checkbox-group">
+                    <label class="checkbox-label" for="video-parser-enabled">
+                        <input id="video-parser-enabled" type="checkbox">
+                        <span>启用结果解析（Python）</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="video-parser-code">解析代码（定义 parse(context)）</label>
+                    <textarea id="video-parser-code" rows="10" class="code-text">def parse(context):
+    """示例：直接返回原始条目列表。
+    context.platform: 平台名
+    context.page_url: 本次任务入口 URL
+    context.raw_items: 适配器返回的原始列表
+    context.raw_payload: 原始 payload
+    """
+    items = []
+    for item in context.raw_items:
+        items.append(item)
+    return {"items": items}
+</textarea>
+                </div>
+
                 <div class="form-group">
                     <label for="video-notes">任务说明</label>
-                    <textarea id="video-notes" rows="3" placeholder="可记录目标账号、采集用途或筛选条件"></textarea>
+                    <textarea id="video-notes" rows="3" placeholder="可记录 BV 号、用途或备注"></textarea>
                 </div>
 
                 <div class="form-actions">
@@ -118,7 +142,7 @@
         <div class="card">
             <div class="card-header">
                 <h3>实时日志</h3>
-                <span class="hint">placeholder</span>
+                <span class="hint">通过 WebSocket 实时推送</span>
             </div>
             <div class="card-body">
                 <pre id="video-log-console" class="log-console dpjs-log-console dpjs-drag-scroll">等待视频任务日志...</pre>
@@ -137,9 +161,8 @@
         <div class="dpjs-result-footer">
             <div class="dpjs-result-actions">
                 <button id="video-copy-json" type="button" class="btn dpjs-download-btn">复制 JSON</button>
-                <button id="video-load-demo" type="button" class="btn dpjs-download-btn">载入示例结果</button>
             </div>
-            <span id="video-result-hint" class="hint">当前为页面占位版，后续可接入真实接口与 WebSocket。</span>
+            <span id="video-result-hint" class="hint">当前仅支持 bilibili 单视频页；Cookie 非必填，失败后再补。</span>
         </div>
     </div>
 </section>
@@ -147,7 +170,7 @@
 <section class="card">
     <div class="card-header">
         <h3>最近任务</h3>
-        <span class="hint">最近 3 条示例视频任务</span>
+        <span class="hint">最近 10 条视频任务</span>
     </div>
     <div class="card-body">
         <div class="table-wrap">

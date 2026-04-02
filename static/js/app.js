@@ -1,3 +1,5 @@
+const VIDEO_HINT_TEXT = "当前仅支持 bilibili 单视频页；Cookie 非必填，失败后再补 Cookie。";
+
 function appendLogToElement(elementId, waitingText, message) {
     const consoleEl = document.getElementById(elementId);
     if (!consoleEl) return;
@@ -111,51 +113,65 @@ function badgeClass(status) {
     return "badge";
 }
 
-function renderRecentTasks(tasks) {
-    const body = document.getElementById("recent-tasks-body");
+function isTaskRunning(status) {
+    return ["pending", "running"].includes(String(status || "").toLowerCase());
+}
+
+function renderTaskRows(tasks, { bodyId, columns, emptyText, rowClass = "", includeTaskId = false }) {
+    const body = document.getElementById(bodyId);
     if (!body) return;
     if (!tasks || tasks.length === 0) {
         body.innerHTML = `
             <tr>
-                <td colspan="5" class="table-empty">暂无任务记录</td>
+                <td colspan="${columns}" class="table-empty">${escapeHtml(emptyText)}</td>
             </tr>
         `;
         return;
     }
-    body.innerHTML = tasks.map((task) => `
-        <tr>
-            <td><span class="code-text dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_uuid)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_type)}</span></td>
-            <td><span class="${badgeClass(task.status)}">${formatText(task.status)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.target_url)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.created_at)}</span></td>
+    body.innerHTML = tasks.map((task) => {
+        const taskId = String(task.task_uuid ?? "");
+        const dataTaskId = includeTaskId ? ` data-task-id="${escapeHtml(taskId)}"` : "";
+        const rowClassAttr = rowClass ? ` class="${rowClass}"` : "";
+        return `
+        <tr${dataTaskId}${rowClassAttr}>
+            ${task.cells.map((cell) => `
+                <td><span class="${cell.className}">${escapeHtml(formatText(cell.value))}</span></td>
+            `).join("")}
         </tr>
-    `).join("");
+    `;
+    }).join("");
     initDpjsHorizontalDragScroll(body);
 }
 
+function renderRecentTasks(tasks) {
+    renderTaskRows(
+        (tasks || []).map((task) => ({
+            task_uuid: task.task_uuid,
+            cells: [
+                { className: "code-text dpjs-inline-scroll dpjs-drag-scroll", value: task.task_uuid },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.task_type },
+                { className: badgeClass(task.status), value: task.status },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.target_url },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.created_at },
+            ],
+        })),
+        { bodyId: "recent-tasks-body", columns: 5, emptyText: "暂无任务记录" },
+    );
+}
+
 function renderDpjsTasks(tasks) {
-    const body = document.getElementById("dpjs-tasks-body");
-    if (!body) return;
-    if (!tasks || tasks.length === 0) {
-        body.innerHTML = `
-            <tr>
-                <td colspan="4" class="table-empty">暂无 DPJS 任务</td>
-            </tr>
-        `;
-        return;
-    }
-    body.innerHTML = tasks.map((task) => `
-        <tr data-task-id="${formatText(task.task_uuid, "")}" class="dpjs-task-row">
-            <td>
-                <span class="code-text dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_uuid)}</span>
-            </td>
-            <td><span class="${badgeClass(task.status)}">${formatText(task.status)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.target_url)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.created_at)}</span></td>
-        </tr>
-    `).join("");
-    initDpjsHorizontalDragScroll(body);
+    renderTaskRows(
+        (tasks || []).map((task) => ({
+            task_uuid: task.task_uuid,
+            cells: [
+                { className: "code-text dpjs-inline-scroll dpjs-drag-scroll", value: task.task_uuid },
+                { className: badgeClass(task.status), value: task.status },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.target_url },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.created_at },
+            ],
+        })),
+        { bodyId: "dpjs-tasks-body", columns: 4, emptyText: "暂无 DPJS 任务", rowClass: "dpjs-task-row", includeTaskId: true },
+    );
 }
 
 function updateTaskBadge(status, message, elementId = "task-status-badge") {
@@ -166,20 +182,16 @@ function updateTaskBadge(status, message, elementId = "task-status-badge") {
     badge.textContent = text || "待命";
 }
 
-function isDpjsTaskRunning(status) {
-    return ["pending", "running"].includes(String(status || "").toLowerCase());
-}
-
 function isDpjsTaskStopping(task) {
     if (!task) return false;
     const message = String(task.message || task.error_message || "").toLowerCase();
-    return isDpjsTaskRunning(task.status) && message.includes("stopping");
+    return isTaskRunning(task.status) && message.includes("stopping");
 }
 
 function syncDpjsRunButton(task, isSubmittingStop = false) {
     const runBtn = document.getElementById("dpjs-run-btn");
     if (!runBtn) return;
-    const running = isDpjsTaskRunning(task?.status);
+    const running = isTaskRunning(task?.status);
     const stopping = isSubmittingStop || isDpjsTaskStopping(task);
     runBtn.classList.toggle("dpjs-run-btn-danger", running || stopping);
     runBtn.disabled = stopping;
@@ -777,25 +789,56 @@ async function initDpjsSpider() {
 }
 
 function renderVideoTasks(tasks) {
-    const body = document.getElementById("video-tasks-body");
-    if (!body) return;
-    if (!tasks || tasks.length === 0) {
-        body.innerHTML = `
-            <tr>
-                <td colspan="4" class="table-empty">暂无视频任务</td>
-            </tr>
-        `;
-        return;
+    renderTaskRows(
+        (tasks || []).map((task) => ({
+            task_uuid: task.task_uuid,
+            cells: [
+                { className: "code-text dpjs-inline-scroll dpjs-drag-scroll", value: task.task_uuid },
+                { className: badgeClass(task.status), value: task.status },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.target_url },
+                { className: "dpjs-inline-scroll dpjs-drag-scroll", value: task.created_at },
+            ],
+        })),
+        { bodyId: "video-tasks-body", columns: 4, emptyText: "暂无视频任务", rowClass: "dpjs-task-row", includeTaskId: true },
+    );
+}
+
+function loadVideoSummary(task) {
+    if (!task) {
+        return { updatedAt: "-", summary: "-", resultJson: {} };
     }
-    body.innerHTML = tasks.map((task) => `
-        <tr data-task-id="${formatText(task.task_uuid, "")}" class="dpjs-task-row">
-            <td><span class="code-text dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.task_uuid)}</span></td>
-            <td><span class="${badgeClass(task.status)}">${formatText(task.status)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.target_url)}</span></td>
-            <td><span class="dpjs-inline-scroll dpjs-drag-scroll">${formatText(task.created_at)}</span></td>
-        </tr>
-    `).join("");
-    initDpjsHorizontalDragScroll(body);
+    const resultJson = task.result_json || {};
+    const itemCount = Number(resultJson.item_count || 0);
+    const downloadCount = Number(resultJson.download_count || 0);
+    const errorCount = Array.isArray(resultJson.errors) ? resultJson.errors.length : 0;
+    const updatedAt = formatText(task.completed_at || task.started_at || task.updated_at || task.created_at);
+    const summaryParts = [
+        `status=${formatText(task.status)}`,
+        `items=${itemCount}`,
+        `downloaded=${downloadCount}`,
+    ];
+    if (task.error_message) {
+        summaryParts.push(`error=${formatText(task.error_message)}`);
+    } else if (errorCount > 0) {
+        summaryParts.push(`errors=${errorCount}`);
+    }
+    return { updatedAt, summary: summaryParts.join(" · "), resultJson };
+}
+
+async function loadVideoTask(taskId) {
+    const data = await requestJson(`/api/video/tasks/${encodeURIComponent(taskId)}`);
+    if (!data.ok || !data.task) return null;
+
+    const task = data.task;
+    renderVideoResult(task);
+
+    const consoleEl = document.getElementById("video-log-console");
+    if (consoleEl) {
+        consoleEl.textContent = data.logs && data.logs.length
+            ? data.logs.map((item) => item.message).join("\n")
+            : "等待视频任务日志...";
+    }
+    return task;
 }
 
 function renderVideoResult(task) {
@@ -816,18 +859,33 @@ function renderVideoResult(task) {
         return;
     }
 
+    const { updatedAt, summary, resultJson } = loadVideoSummary(task);
     currentTaskEl.textContent = formatText(task.task_uuid);
     targetEl.textContent = formatText(task.target_url);
-    updatedEl.textContent = formatText(task.updated_at || task.created_at);
-    summaryEl.textContent = formatText(task.summary || task.status);
-    resultEl.textContent = JSON.stringify(task.result_json || {}, null, 2);
-    updateTaskBadge(task.status || "待命", task.message || "", "video-task-status-badge");
+    updatedEl.textContent = updatedAt;
+    summaryEl.textContent = summary;
+
+    if (Object.keys(resultJson).length > 0) {
+        resultEl.textContent = JSON.stringify(resultJson, null, 2);
+    } else if (task.error_message) {
+        resultEl.textContent = task.error_message;
+    } else {
+        resultEl.textContent = "等待任务结果...";
+    }
+
+    updateTaskBadge(task.status || "待命", task.message || task.error_message || "", "video-task-status-badge");
 }
 
 function buildVideoPayload() {
+    const platformSelect = document.getElementById("video-platform");
+    const customPlatformInput = document.getElementById("video-platform-custom");
+    const rawPlatform = platformSelect?.value || "video:generic";
+    const customPlatform = (customPlatformInput?.value || "").trim();
+    const platform = customPlatform || rawPlatform;
+
     return {
         page_url: document.getElementById("video-page-url").value,
-        platform: document.getElementById("video-platform").value,
+        platform,
         save_dir: document.getElementById("video-save-dir").value,
         max_count: Number(document.getElementById("video-max-count").value || 0),
         quality: document.getElementById("video-quality").value,
@@ -836,28 +894,70 @@ function buildVideoPayload() {
         headless: document.getElementById("video-headless").checked,
         extra_headers: parseJsonField(document.getElementById("video-extra-headers").value, {}),
         notes: document.getElementById("video-notes").value,
+        parser_enabled: document.getElementById("video-parser-enabled")?.checked ?? false,
+        parser_code: document.getElementById("video-parser-code")?.value ?? "",
     };
 }
 
-function setVideoConfig(config) {
-    document.getElementById("video-page-url").value = formatText(config.page_url, "");
-    document.getElementById("video-platform").value = formatText(config.platform, "douyin");
-    document.getElementById("video-save-dir").value = formatText(config.save_dir, "data/video-downloads");
-    document.getElementById("video-max-count").value = Number(config.max_count || 20);
-    document.getElementById("video-quality").value = formatText(config.quality, "source");
-    document.getElementById("video-proxy-url").value = formatText(config.proxy_url, "");
-    document.getElementById("video-download-media").checked = config.download_media !== false;
-    document.getElementById("video-headless").checked = config.headless !== false;
-    document.getElementById("video-extra-headers").value = JSON.stringify(config.extra_headers || { Referer: "", Cookie: "" }, null, 2);
-    document.getElementById("video-notes").value = formatText(config.notes, "");
+function readVideoPayload() {
+    try {
+        return { ok: true, payload: buildVideoPayload() };
+    } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
 }
 
-function syncVideoRunButton(task, isRunning = false) {
+function getVideoPlatformCode(config) {
+    const platform = String(config?.platform || "").trim();
+    if (platform.startsWith("video:")) return platform;
+    const adapterType = String(config?.adapter?.type || "").trim();
+    const candidate = adapterType && adapterType !== "generic" ? adapterType : (platform || "bilibili");
+    return `video:${candidate}`;
+}
+
+function setVideoConfig(config) {
+    const download = config.download || {};
+    const request = config.request || {};
+    const parser = config.parser || {};
+    const runtime = config.runtime || {};
+
+    document.getElementById("video-page-url").value = formatText(runtime.page_url || config.page_url_template, "");
+    document.getElementById("video-save-dir").value = formatText(download.save_dir, "data/video-downloads");
+    document.getElementById("video-max-count").value = Math.max(1, Number(download.max_count || 1));
+    document.getElementById("video-quality").value = formatText(download.quality, "source");
+    document.getElementById("video-proxy-url").value = formatText(request.proxy_url, "");
+    document.getElementById("video-download-media").checked = (download.mode || "file") === "file";
+    document.getElementById("video-headless").checked = request.headless !== false;
+    document.getElementById("video-extra-headers").value = JSON.stringify(request.extra_headers || { Referer: "", Cookie: "" }, null, 2);
+    document.getElementById("video-notes").value = formatText(config.notes, "");
+
+    const platformSelect = document.getElementById("video-platform");
+    if (platformSelect) {
+        platformSelect.value = getVideoPlatformCode(config);
+    }
+
+    const parserEnabledEl = document.getElementById("video-parser-enabled");
+    const parserCodeEl = document.getElementById("video-parser-code");
+    if (parserEnabledEl) parserEnabledEl.checked = !!parser.enabled;
+    if (parserCodeEl) parserCodeEl.value = formatText(parser.code, parserCodeEl.value || "");
+}
+
+function isVideoTaskStopping(task) {
+    if (!task) return false;
+    const message = String(task.message || task.error_message || "").toLowerCase();
+    return isTaskRunning(task.status) && message.includes("stopping");
+}
+
+function syncVideoRunButton(task, isSubmittingStop = false) {
     const runBtn = document.getElementById("video-run-btn");
     if (!runBtn) return;
-    const running = isRunning || ["pending", "running"].includes(String(task?.status || "").toLowerCase());
-    runBtn.classList.toggle("video-run-btn-active", running);
-    runBtn.textContent = running ? "运行中（占位）" : "立即运行";
+    const running = isTaskRunning(task?.status);
+    const stopping = isSubmittingStop || isVideoTaskStopping(task);
+
+    runBtn.classList.toggle("video-run-btn-active", running || stopping);
+    runBtn.disabled = stopping;
+    runBtn.textContent = stopping ? "停止中..." : running ? "停止运行" : "立即运行";
+    runBtn.dataset.mode = running ? "stop" : "run";
 }
 
 async function copyVideoResult() {
@@ -877,128 +977,178 @@ async function initVideoSpider() {
     const result = document.getElementById("video-form-result");
     const runBtn = document.getElementById("video-run-btn");
     const copyBtn = document.getElementById("video-copy-json");
-    const demoBtn = document.getElementById("video-load-demo");
     const resultHint = document.getElementById("video-result-hint");
+    let socket = null;
+    let currentTask = null;
+    let isSubmittingStop = false;
 
-    const sampleConfig = {
-        page_url: "https://example.com/channel/demo",
-        platform: "bilibili",
-        save_dir: "data/video-downloads",
-        max_count: 20,
-        quality: "1080p",
-        proxy_url: "",
-        download_media: true,
-        headless: true,
-        extra_headers: { Referer: "", Cookie: "" },
-        notes: "示例任务：抓取最近更新的视频列表",
-    };
+    initDpjsHorizontalDragScroll(page);
 
-    const sampleTasks = [
-        {
-            task_uuid: "video-demo-20260402-001",
-            status: "completed",
-            target_url: "https://example.com/channel/demo",
-            created_at: "2026-04-02 10:15:00",
-            updated_at: "2026-04-02 10:18:12",
-            summary: "抓取 12 条视频，成功下载 8 条",
-            result_json: {
-                platform: "bilibili",
-                request_count: 12,
-                download_count: 8,
-                videos: [
-                    { title: "示例视频 A", duration: "03:12", quality: "1080p", author: "demo-up" },
-                    { title: "示例视频 B", duration: "08:45", quality: "720p", author: "demo-up" }
-                ]
-            }
+    const connectVideoSocket = (taskId) => connectTaskSocket(taskId, {
+        onLog: (payload) => {
+            appendLogToElement("video-log-console", "等待视频任务日志...", payload.message);
         },
-        {
-            task_uuid: "video-demo-20260401-002",
-            status: "running",
-            target_url: "https://example.com/video/next",
-            created_at: "2026-04-01 18:00:00",
-            updated_at: "2026-04-01 18:02:31",
-            summary: "正在解析播放地址",
-            message: "解析第 3 个视频页面",
-            result_json: {
-                platform: "douyin",
-                progress: "3 / 10"
+        onStatus: async (payload) => {
+            const status = payload.status || "待命";
+            const message = payload.message || "";
+            updateTaskBadge(status, message, "video-task-status-badge");
+            if (!currentTask || currentTask.task_uuid !== taskId) return;
+            currentTask = {
+                ...currentTask,
+                status: payload.status || currentTask.status,
+                message: payload.message || currentTask.message,
+                error_message: payload.error_message || currentTask.error_message,
+                started_at: payload.started_at || currentTask.started_at,
+                completed_at: payload.completed_at || currentTask.completed_at,
+                target_url: payload.target_url || currentTask.target_url,
+            };
+            if (["completed", "failed", "cancelled"].includes(String(payload.status || "").toLowerCase())) {
+                isSubmittingStop = false;
+                currentTask = await loadVideoTask(taskId);
+                const list = await requestJson("/api/video/tasks");
+                renderVideoTasks(list.tasks || []);
+            } else {
+                renderVideoResult(currentTask);
             }
+            syncVideoRunButton(currentTask, isSubmittingStop);
         },
-        {
-            task_uuid: "video-demo-20260331-003",
-            status: "failed",
-            target_url: "https://example.com/private/list",
-            created_at: "2026-03-31 21:40:00",
-            updated_at: "2026-03-31 21:41:22",
-            summary: "Cookie 失效，任务中断",
-            message: "请求被平台风控拦截",
-            result_json: {
-                error: "Cookie expired"
+    });
+
+    try {
+        const initial = await requestJson("/api/video");
+        const platforms = initial.platforms || [];
+        const active = initial.active_platform || platforms[0] || null;
+        const config = initial.config || {};
+
+        const platformSelect = document.getElementById("video-platform");
+        const customPlatformInput = document.getElementById("video-platform-custom");
+        if (platformSelect) {
+            const defaultOptions = [{ code: "video:bilibili", name: "Bilibili" }];
+            const optionSource = platforms.length > 0 ? platforms : defaultOptions;
+            platformSelect.innerHTML = optionSource.map((site) => `
+                <option value="${escapeHtml(site.code)}">
+                    ${escapeHtml(site.name || site.code)}
+                </option>
+            `).join("");
+            if (active?.code) {
+                platformSelect.value = active.code;
+            } else {
+                platformSelect.value = "video:bilibili";
             }
         }
-    ];
+        if (customPlatformInput) {
+            customPlatformInput.value = "";
+        }
 
-    let currentTask = sampleTasks[0];
-    setVideoConfig(sampleConfig);
-    renderVideoTasks(sampleTasks);
-    renderVideoResult(currentTask);
-    syncVideoRunButton(currentTask);
-    initDpjsHorizontalDragScroll(page);
-    appendLogToElement("video-log-console", "等待视频任务日志...", "[system] 视频爬虫页面已加载，当前为占位版。");
-    appendLogToElement("video-log-console", "等待视频任务日志...", "[hint] 后续可接入真实 /api/video/* 接口和任务 WebSocket。");
+        setVideoConfig(config);
+        renderVideoTasks(initial.recent_tasks || []);
+        if (initial.recent_tasks && initial.recent_tasks.length > 0) {
+            currentTask = await loadVideoTask(initial.recent_tasks[0].task_uuid);
+            syncVideoRunButton(currentTask, isSubmittingStop);
+        } else {
+            renderVideoResult(null);
+            syncVideoRunButton(null, isSubmittingStop);
+        }
+        resultHint.textContent = VIDEO_HINT_TEXT;
+    } catch (error) {
+        if (result) {
+            result.textContent = error.message;
+            result.className = "form-result error";
+        }
+    }
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
-        result.textContent = "已保存占位配置";
-        result.className = "form-result success";
-        appendLogToElement("video-log-console", "等待视频任务日志...", `[config] 已更新视频任务配置: ${buildVideoPayload().platform}`);
+        result.textContent = "保存中...";
+        result.className = "form-result";
+        try {
+            const payloadResult = readVideoPayload();
+            if (!payloadResult.ok) {
+                result.textContent = payloadResult.message;
+                result.className = "form-result error";
+                return;
+            }
+            const saveResult = await requestJson("/api/video/config", {
+                method: "PUT",
+                body: JSON.stringify(payloadResult.payload),
+            });
+            result.textContent = saveResult.ok ? "视频配置已保存" : "保存失败";
+            result.className = `form-result ${saveResult.ok ? "success" : "error"}`;
+            if (saveResult.config) {
+                setVideoConfig(saveResult.config);
+            }
+        } catch (error) {
+            result.textContent = error.message;
+            result.className = "form-result error";
+        }
     });
 
     runBtn.addEventListener("click", async () => {
-        const payload = buildVideoPayload();
-        currentTask = {
-            task_uuid: `video-demo-${Date.now()}`,
-            status: "running",
-            target_url: payload.page_url,
-            created_at: new Date().toLocaleString("zh-CN", { hour12: false }),
-            updated_at: new Date().toLocaleString("zh-CN", { hour12: false }),
-            summary: "页面占位版：已生成模拟任务",
-            message: "尚未接入真实后端",
-            result_json: {
-                platform: payload.platform,
-                max_count: payload.max_count,
-                quality: payload.quality,
-                download_media: payload.download_media,
-                save_dir: payload.save_dir,
-                note: "当前页面只提供 UI 结构与占位交互。"
-            }
-        };
-        syncVideoRunButton(currentTask, true);
-        renderVideoResult(currentTask);
-        result.textContent = "已生成占位任务";
-        result.className = "form-result success";
-        resultHint.textContent = "当前展示的是模拟任务结果，后续可无缝切换到真实接口。";
-        appendLogToElement("video-log-console", "等待视频任务日志...", `[run] 已创建占位任务 ${currentTask.task_uuid}`);
-        appendLogToElement("video-log-console", "等待视频任务日志...", `[run] 目标地址: ${payload.page_url || "-"}`);
-        window.setTimeout(() => {
-            currentTask = {
-                ...currentTask,
-                status: "completed",
-                updated_at: new Date().toLocaleString("zh-CN", { hour12: false }),
-                summary: "页面占位版：模拟任务已完成",
-                result_json: {
-                    ...currentTask.result_json,
-                    finished: true,
-                    preview_items: [
-                        { title: "示例视频 1", status: "downloaded" },
-                        { title: "示例视频 2", status: "metadata-only" }
-                    ]
+        const taskId = currentTask?.task_uuid;
+        if (runBtn.dataset.mode === "stop" && taskId) {
+            result.textContent = "停止中...";
+            result.className = "form-result";
+            isSubmittingStop = true;
+            syncVideoRunButton(currentTask, isSubmittingStop);
+            try {
+                const stopResult = await requestJson(`/api/video/tasks/${encodeURIComponent(taskId)}/cancel`, {
+                    method: "POST",
+                });
+                currentTask = {
+                    ...currentTask,
+                    status: stopResult.status === "cancelling" ? (currentTask?.status || "running") : currentTask?.status,
+                    message: stopResult.status === "cancelling" ? "Video task stopping" : currentTask?.message,
+                };
+                renderVideoResult(currentTask);
+                result.textContent = stopResult.ok ? "已提交停止请求" : (stopResult.message || "停止失败");
+                result.className = `form-result ${stopResult.ok ? "success" : "error"}`;
+                syncVideoRunButton(currentTask, isSubmittingStop);
+                if (!stopResult.ok) {
+                    isSubmittingStop = false;
+                    currentTask = await loadVideoTask(taskId);
+                    syncVideoRunButton(currentTask, isSubmittingStop);
                 }
-            };
-            syncVideoRunButton(currentTask);
+            } catch (error) {
+                isSubmittingStop = false;
+                result.textContent = error.message;
+                result.className = "form-result error";
+                syncVideoRunButton(currentTask, isSubmittingStop);
+            }
+            return;
+        }
+
+        result.textContent = "运行中...";
+        result.className = "form-result";
+        try {
+            const payloadResult = readVideoPayload();
+            if (!payloadResult.ok) {
+                result.textContent = payloadResult.message;
+                result.className = "form-result error";
+                return;
+            }
+            const runResult = await requestJson("/api/video/run", {
+                method: "POST",
+                body: JSON.stringify(payloadResult.payload),
+            });
+            if (socket) socket.close();
+            currentTask = runResult.task;
+            isSubmittingStop = false;
+            document.getElementById("video-log-console").textContent = "等待视频任务日志...";
             renderVideoResult(currentTask);
-            appendLogToElement("video-log-console", "等待视频任务日志...", `[status] completed - ${currentTask.summary}`);
-        }, 800);
+            syncVideoRunButton(currentTask, isSubmittingStop);
+            socket = connectVideoSocket(runResult.task_id);
+            result.textContent = "视频任务已启动";
+            result.className = "form-result success";
+            const list = await requestJson("/api/video/tasks");
+            renderVideoTasks(list.tasks || []);
+            currentTask = await loadVideoTask(runResult.task_id);
+            syncVideoRunButton(currentTask, isSubmittingStop);
+        } catch (error) {
+            isSubmittingStop = false;
+            result.textContent = error.message;
+            result.className = "form-result error";
+            syncVideoRunButton(currentTask, isSubmittingStop);
+        }
     });
 
     copyBtn?.addEventListener("click", async () => {
@@ -1012,23 +1162,16 @@ async function initVideoSpider() {
         }
     });
 
-    demoBtn?.addEventListener("click", () => {
-        currentTask = sampleTasks[0];
-        renderVideoResult(currentTask);
-        syncVideoRunButton(currentTask);
-        appendLogToElement("video-log-console", "等待视频任务日志...", `[demo] 已载入示例任务 ${currentTask.task_uuid}`);
-    });
-
-    document.getElementById("video-tasks-body")?.addEventListener("click", (event) => {
+    document.getElementById("video-tasks-body")?.addEventListener("click", async (event) => {
         const row = event.target.closest("tr[data-task-id]");
         if (!row) return;
         const taskId = row.dataset.taskId;
-        const task = sampleTasks.find((item) => item.task_uuid === taskId);
-        if (!task) return;
-        currentTask = task;
-        renderVideoResult(task);
-        syncVideoRunButton(task);
-        appendLogToElement("video-log-console", "等待视频任务日志...", `[select] 切换到任务 ${task.task_uuid}`);
+        if (!taskId) return;
+        if (socket) socket.close();
+        isSubmittingStop = false;
+        socket = connectVideoSocket(taskId);
+        currentTask = await loadVideoTask(taskId);
+        syncVideoRunButton(currentTask, isSubmittingStop);
     });
 }
 
