@@ -117,6 +117,10 @@ function isTaskRunning(status) {
     return ["pending", "running"].includes(String(status || "").toLowerCase());
 }
 
+function isTaskTerminal(status) {
+    return ["completed", "failed", "cancelled"].includes(String(status || "").toLowerCase());
+}
+
 function renderTaskRows(tasks, { bodyId, columns, emptyText, rowClass = "", includeTaskId = false }) {
     const body = document.getElementById(bodyId);
     if (!body) return;
@@ -180,6 +184,41 @@ function updateTaskBadge(status, message, elementId = "task-status-badge") {
     const text = message ? `${status} · ${message}` : status;
     badge.className = badgeClass(status);
     badge.textContent = text || "待命";
+}
+
+function updateTaskResultMessage(resultEl, task, messages = {}) {
+    if (!resultEl || !task) return;
+    const status = String(task.status || "").toLowerCase();
+    if (status === "completed") {
+        resultEl.textContent = messages.completed || "任务已完成";
+        resultEl.className = "form-result success";
+        return;
+    }
+    if (status === "cancelled") {
+        resultEl.textContent = task.message || messages.cancelled || "任务已取消";
+        resultEl.className = "form-result";
+        return;
+    }
+    if (status === "failed") {
+        resultEl.textContent = task.error_message || task.message || messages.failed || "任务失败";
+        resultEl.className = "form-result error";
+    }
+}
+
+function buildRunningTask(task, message) {
+    return {
+        ...task,
+        status: "running",
+        message,
+    };
+}
+
+async function refreshTaskListAndDashboard(listPath, renderTasks) {
+    const [list] = await Promise.all([
+        requestJson(listPath),
+        loadDashboardSummary(),
+    ]);
+    renderTasks(list.tasks || []);
 }
 
 function isDpjsTaskStopping(task) {
@@ -251,10 +290,22 @@ async function initDashboard() {
     const button = document.getElementById("demo-task-btn");
     if (!input || !button) return;
 
-    let socket = connectTaskSocket(input.value);
+    let socket = connectTaskSocket(input.value, {
+        onStatus: async (payload) => {
+            if (isTaskTerminal(payload.status)) {
+                await loadDashboardSummary();
+            }
+        },
+    });
     button.addEventListener("click", async () => {
         if (socket) socket.close();
-        socket = connectTaskSocket(input.value);
+        socket = connectTaskSocket(input.value, {
+            onStatus: async (payload) => {
+                if (isTaskTerminal(payload.status)) {
+                    await loadDashboardSummary();
+                }
+            },
+        });
         await requestJson(`/api/dashboard/demo-task/${encodeURIComponent(input.value)}`, { method: "POST" });
         await loadDashboardSummary();
     });
@@ -634,8 +685,16 @@ async function initDpjsSpider() {
         document.getElementById("dpjs-parse"),
     ].forEach(bindTextareaTabIndent);
 
+    const updateDpjsResultMessage = (task) => {
+        updateTaskResultMessage(result, task, {
+            completed: "DPJS 任务已完成",
+            cancelled: "DPJS 任务已取消",
+            failed: "DPJS 任务失败",
+        });
+    };
+
     const connectDpjsSocket = (taskId) => connectTaskSocket(taskId, {
-        onStatus: (payload) => {
+        onStatus: async (payload) => {
             if (!currentTask || currentTask.task_uuid !== taskId) return;
             currentTask = {
                 ...currentTask,
@@ -645,8 +704,14 @@ async function initDpjsSpider() {
                 started_at: payload.started_at || currentTask.started_at,
                 completed_at: payload.completed_at || currentTask.completed_at,
             };
-            if (["completed", "failed", "cancelled"].includes(String(payload.status || "").toLowerCase())) {
+            if (isTaskTerminal(payload.status)) {
                 isSubmittingStop = false;
+                currentTask = await loadDpjsTask(taskId);
+                await refreshTaskListAndDashboard("/api/dpjs/tasks", renderDpjsTasks);
+                updateDpjsResultMessage(currentTask);
+            } else {
+                renderDpjsResult(currentTask);
+                updateDpjsResultMessage(currentTask);
             }
             syncDpjsRunButton(currentTask, isSubmittingStop);
         },
@@ -751,7 +816,7 @@ async function initDpjsSpider() {
                 body: JSON.stringify(buildDpjsPayload()),
             });
             if (socket) socket.close();
-            currentTask = runResult.task;
+            currentTask = buildRunningTask(runResult.task, "DPJS task started");
             isSubmittingStop = false;
             document.getElementById("log-console").textContent = "等待任务日志...";
             document.getElementById("summary-current-task").textContent = runResult.task_id;
@@ -760,6 +825,7 @@ async function initDpjsSpider() {
             socket = connectDpjsSocket(runResult.task_id);
             result.textContent = "DPJS 任务已启动";
             result.className = "form-result success";
+            updateDpjsResultMessage(currentTask);
             const taskList = await requestJson("/api/dpjs/tasks");
             renderDpjsTasks(taskList.tasks || []);
             currentTask = await loadDpjsTask(runResult.task_id);
@@ -979,8 +1045,60 @@ async function initVideoSpider() {
     let socket = null;
     let currentTask = null;
     let isSubmittingStop = false;
+    let statusPollTimer = null;
 
     initDpjsHorizontalDragScroll(page);
+
+    const stopVideoStatusPoll = () => {
+        if (statusPollTimer) {
+            clearInterval(statusPollTimer);
+            statusPollTimer = null;
+        }
+    };
+
+    const updateVideoResultMessage = (task) => {
+        updateTaskResultMessage(result, task, {
+            completed: "视频任务已完成",
+            cancelled: "视频任务已取消",
+            failed: "视频任务失败",
+        });
+    };
+
+        const refreshVideoTaskViews = async (taskId) => {
+        currentTask = await loadVideoTask(taskId);
+        await refreshTaskListAndDashboard("/api/video/tasks", renderVideoTasks);
+        syncVideoRunButton(currentTask, isSubmittingStop);
+        updateVideoResultMessage(currentTask);
+    };
+
+    const startVideoStatusPoll = (taskId) => {
+        stopVideoStatusPoll();
+        statusPollTimer = setInterval(async () => {
+            if (!currentTask || currentTask.task_uuid !== taskId) {
+                stopVideoStatusPoll();
+                return;
+            }
+            if (!isTaskRunning(currentTask.status)) {
+                stopVideoStatusPoll();
+                return;
+            }
+            try {
+                const nextTask = await loadVideoTask(taskId);
+                if (!nextTask || currentTask?.task_uuid !== taskId) {
+                    stopVideoStatusPoll();
+                    return;
+                }
+                currentTask = nextTask;
+                syncVideoRunButton(currentTask, isSubmittingStop);
+                if (isTaskTerminal(currentTask.status)) {
+                    isSubmittingStop = false;
+                    await refreshVideoTaskViews(taskId);
+                    stopVideoStatusPoll();
+                }
+            } catch {
+            }
+        }, 1500);
+    };
 
     const connectVideoSocket = (taskId) => connectTaskSocket(taskId, {
         onLog: (payload) => {
@@ -1000,15 +1118,15 @@ async function initVideoSpider() {
                 completed_at: payload.completed_at || currentTask.completed_at,
                 target_url: payload.target_url || currentTask.target_url,
             };
-            if (["completed", "failed", "cancelled"].includes(String(payload.status || "").toLowerCase())) {
+            if (isTaskTerminal(payload.status)) {
                 isSubmittingStop = false;
-                currentTask = await loadVideoTask(taskId);
-                const list = await requestJson("/api/video/tasks");
-                renderVideoTasks(list.tasks || []);
+                await refreshVideoTaskViews(taskId);
+                stopVideoStatusPoll();
             } else {
                 renderVideoResult(currentTask);
+                syncVideoRunButton(currentTask, isSubmittingStop);
+                updateVideoResultMessage(currentTask);
             }
-            syncVideoRunButton(currentTask, isSubmittingStop);
         },
     });
 
@@ -1042,6 +1160,10 @@ async function initVideoSpider() {
         renderVideoTasks(initial.recent_tasks || []);
         if (initial.recent_tasks && initial.recent_tasks.length > 0) {
             currentTask = await loadVideoTask(initial.recent_tasks[0].task_uuid);
+            if (isTaskRunning(currentTask?.status)) {
+                socket = connectVideoSocket(currentTask.task_uuid);
+                startVideoStatusPoll(currentTask.task_uuid);
+            }
             syncVideoRunButton(currentTask, isSubmittingStop);
         } else {
             renderVideoResult(null);
@@ -1101,7 +1223,9 @@ async function initVideoSpider() {
                 result.textContent = stopResult.ok ? "已提交停止请求" : (stopResult.message || "停止失败");
                 result.className = `form-result ${stopResult.ok ? "success" : "error"}`;
                 syncVideoRunButton(currentTask, isSubmittingStop);
-                if (!stopResult.ok) {
+                if (stopResult.ok) {
+                    startVideoStatusPoll(taskId);
+                } else {
                     isSubmittingStop = false;
                     currentTask = await loadVideoTask(taskId);
                     syncVideoRunButton(currentTask, isSubmittingStop);
@@ -1129,12 +1253,14 @@ async function initVideoSpider() {
                 body: JSON.stringify(payloadResult.payload),
             });
             if (socket) socket.close();
-            currentTask = runResult.task;
+            stopVideoStatusPoll();
+            currentTask = buildRunningTask(runResult.task, "Video task started");
             isSubmittingStop = false;
             document.getElementById("video-log-console").textContent = "等待视频任务日志...";
             renderVideoResult(currentTask);
             syncVideoRunButton(currentTask, isSubmittingStop);
             socket = connectVideoSocket(runResult.task_id);
+            startVideoStatusPoll(runResult.task_id);
             result.textContent = "视频任务已启动";
             result.className = "form-result success";
             const list = await requestJson("/api/video/tasks");
@@ -1166,9 +1292,13 @@ async function initVideoSpider() {
         const taskId = row.dataset.taskId;
         if (!taskId) return;
         if (socket) socket.close();
+        stopVideoStatusPoll();
         isSubmittingStop = false;
         socket = connectVideoSocket(taskId);
         currentTask = await loadVideoTask(taskId);
+        if (isTaskRunning(currentTask?.status)) {
+            startVideoStatusPoll(taskId);
+        }
         syncVideoRunButton(currentTask, isSubmittingStop);
     });
 }

@@ -49,6 +49,18 @@ class TaskManager:
         with self._lock:
             self._cancel_requested.discard(task_id)
 
+    def _build_status_payload(self, status: str, **kwargs) -> dict:
+        return {
+            "status": status,
+            "task_type": kwargs.get("task_type"),
+            "site_id": kwargs.get("site_id"),
+            "target_url": kwargs.get("target_url"),
+            "message": kwargs.get("message"),
+            "error_message": kwargs.get("error_message"),
+            "started_at": kwargs.get("started_at"),
+            "completed_at": kwargs.get("completed_at"),
+        }
+
     def add_log(self, task_id: str, message: str, level: str = "info"):
         self._logs[task_id].append(message)
         with get_db() as db:
@@ -71,7 +83,7 @@ class TaskManager:
             )
 
     def update_status(self, task_id: str, status: str, **kwargs):
-        payload = {"status": status, **kwargs}
+        payload = self._build_status_payload(status, **kwargs)
         self._status[task_id] = payload
         if status in {"completed", "failed", "cancelled"}:
             self.clear_cancel_request(task_id)
@@ -85,7 +97,15 @@ class TaskManager:
                     target_url=kwargs.get("target_url"),
                     status=status,
                 )
-            update_task_status(db, task_id, status, **kwargs)
+            updated_task = update_task_status(db, task_id, status, **kwargs)
+            if updated_task is not None:
+                payload["started_at"] = updated_task.started_at.isoformat() if updated_task.started_at else None
+                payload["completed_at"] = updated_task.completed_at.isoformat() if updated_task.completed_at else None
+                payload["task_type"] = updated_task.task_type
+                payload["site_id"] = updated_task.site_id
+                payload["target_url"] = updated_task.target_url
+                payload["error_message"] = updated_task.error_message
+                self._status[task_id] = payload
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._broadcast_status(task_id), self._loop)
 
@@ -108,6 +128,7 @@ class TaskManager:
                 "site_id": task.site_id,
                 "target_url": task.target_url,
                 "error_message": task.error_message,
+                "message": None,
                 "started_at": task.started_at.isoformat() if task.started_at else None,
                 "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             }
