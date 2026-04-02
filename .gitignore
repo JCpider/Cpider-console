@@ -29,9 +29,10 @@ log/
 logs/
 
 # Local data
-/data/spider_console.db
+data/
 
 # Build artifacts
 build/
 dist/
 *.egg-info/
+.claude/worktrees
