@@ -14,12 +14,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DPJS_ROOT = _PROJECT_ROOT / "dpjs"
 _STANDALONE_MODULE_PATH = _DPJS_ROOT / "standalone_dpjs_downloader.py"
 _DEFAULT_USER_DATA_PATH = _DPJS_ROOT / "google_user_data"
-_DEFAULT_PARSER_CODE = """def parse(response):
-    data = response.json()
-    return {
-        \"items\": data.get(\"items\", []) if isinstance(data, dict) else data
-    }
-"""
 
 _module_lock = threading.Lock()
 _standalone_module = None
@@ -45,10 +39,17 @@ DEFAULT_DPJS_CONFIG = {
         "json": None,
     },
     "request_variables": [{"page": 2}],
-    "result_parser": {
-        "enabled": False,
-        "code": _DEFAULT_PARSER_CODE,
-    },
+    "parse": [
+        {
+            "engine": "json",
+            "rules": {
+                "data": {},
+            },
+            "mapping": {
+                "": {"default": ""},
+            },
+        }
+    ],
 }
 
 
@@ -136,21 +137,29 @@ def has_placeholders(value: Any) -> bool:
     return False
 
 
-def _normalize_result_parser(value: dict[str, Any] | None) -> dict[str, Any]:
-    default_parser = deepcopy(DEFAULT_DPJS_CONFIG["result_parser"])
+def _normalize_parse_section(value: dict[str, Any] | None) -> dict[str, Any]:
     incoming = value or {}
-    code = incoming.get("code")
-    if not isinstance(code, str) or not code.strip():
-        code = default_parser["code"]
     return {
-        "enabled": bool(incoming.get("enabled", default_parser["enabled"])),
-        "code": code,
+        "engine": str(incoming.get("engine") or "json").lower(),
+        "rules": deepcopy(incoming.get("rules") or {}),
+        "mapping": deepcopy(incoming.get("mapping") or {}),
     }
+
+
+def _normalize_parse_sections(value: Any, legacy_parser: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [_normalize_parse_section(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [_normalize_parse_section(value)]
+    if legacy_parser and legacy_parser.get("enabled"):
+        return []
+    return []
 
 
 def normalize_dpjs_config(config: dict[str, Any] | None) -> dict[str, Any]:
     merged = get_default_dpjs_config()
     incoming = config or {}
+    legacy_parser = incoming.get("result_parser") if isinstance(incoming.get("result_parser"), dict) else None
     merged.update({
         "page_url": incoming.get("page_url", merged["page_url"]),
         "user_data_path": incoming.get("user_data_path") or merged["user_data_path"],
@@ -163,7 +172,7 @@ def normalize_dpjs_config(config: dict[str, Any] | None) -> dict[str, Any]:
         "loop_start": float(incoming.get("loop_start", merged["loop_start"]) or 0),
         "loop_count": max(1, int(incoming.get("loop_count", merged["loop_count"]) or 1)),
         "loop_step": float(incoming.get("loop_step", merged["loop_step"]) or 0),
-        "result_parser": _normalize_result_parser(incoming.get("result_parser")),
+        "parse": _normalize_parse_sections(incoming.get("parse"), legacy_parser=legacy_parser),
     })
 
     request_template = deepcopy(merged["request_template"])
@@ -257,29 +266,100 @@ def _coerce_items(value: Any) -> list[Any]:
     return [value]
 
 
-def _execute_parser_code(result: dict[str, Any], parser_config: dict[str, Any]) -> dict[str, Any]:
-    code = str(parser_config.get("code") or "").strip()
-    if not code:
-        raise ValueError("parser code is empty")
+def _extract_json_path(value: Any, path: str) -> list[Any]:
+    current_values = [value]
+    for part in [item for item in str(path or "").split(".") if item]:
+        next_values = []
+        for current in current_values:
+            if part == "$":
+                if isinstance(current, list):
+                    next_values.extend(current)
+                continue
+            if part == "$v":
+                if isinstance(current, dict):
+                    next_values.extend(current.values())
+                elif isinstance(current, list):
+                    next_values.extend(current)
+                continue
+            if isinstance(current, dict) and part in current:
+                next_values.append(current.get(part))
+        current_values = next_values
+        if not current_values:
+            break
+    return current_values
 
-    namespace: dict[str, Any] = {}
-    exec(code, {"__builtins__": __builtins__}, namespace)
-    parse_func = namespace.get("parse")
-    if not callable(parse_func):
-        raise ValueError("parser code must define parse(response)")
 
-    response = DpjsResponseAdapter(result)
-    parsed_result = parse_func(response)
+def _apply_mapping(item: dict[str, Any], mapping: dict[str, Any], variables: dict[str, Any]) -> dict[str, Any]:
+    mapped = dict(item)
+    for field, config in (mapping or {}).items():
+        if not isinstance(config, dict):
+            continue
+        if "default" in config:
+            mapped[field] = format_value(config.get("default"), variables)
+    return mapped
+
+
+def _parse_json_section(body: Any, section: dict[str, Any], variables: dict[str, Any]) -> list[dict[str, Any]]:
+    if section.get("engine") != "json":
+        raise ValueError(f"unsupported parse engine: {section.get('engine')}")
+
     items = []
-    if isinstance(parsed_result, dict) and "items" in parsed_result:
-        items = _coerce_items(parsed_result.get("items"))
-    else:
-        items = _coerce_items(parsed_result)
+    rules = section.get("rules") or {}
+    mapping = section.get("mapping") or {}
+    if rules and all(isinstance(source_path, str) for source_path in rules.values()):
+        parsed_item = {}
+        for target_field, source_path in rules.items():
+            values = _extract_json_path(body, str(source_path))
+            parsed_item[target_field] = values[0] if values else None
+        items.append(_apply_mapping(parsed_item, mapping, variables))
+        return items
 
+    for parent_path, nested_rules in rules.items():
+        parent_values = _extract_json_path(body, parent_path)
+        for parent_value in parent_values:
+            if not isinstance(nested_rules, dict):
+                continue
+            if all(isinstance(source_path, str) for source_path in nested_rules.values()):
+                parsed_item = {}
+                for target_field, source_path in nested_rules.items():
+                    values = _extract_json_path(parent_value, str(source_path))
+                    parsed_item[target_field] = values[0] if values else None
+                items.append(_apply_mapping(parsed_item, mapping, variables))
+                continue
+            for items_path, field_rules in nested_rules.items():
+                rows = _extract_json_path(parent_value, items_path)
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    parsed_item = {}
+                    for target_field, source_path in (field_rules or {}).items():
+                        values = _extract_json_path(row, str(source_path))
+                        parsed_item[target_field] = values[0] if values else None
+                    items.append(_apply_mapping(parsed_item, mapping, variables))
+    return items
+
+
+
+
+def _execute_parse_sections(result: dict[str, Any], parse_sections: list[dict[str, Any]], variables: dict[str, Any]) -> dict[str, Any]:
+    response = DpjsResponseAdapter(result)
+    body = response.json()
+    items = []
+    section_results = []
+    for index, section in enumerate(parse_sections, start=1):
+        section_items = _parse_json_section(body, section, variables)
+        items.extend(section_items)
+        section_results.append({
+            "index": index,
+            "engine": section.get("engine"),
+            "item_count": len(section_items),
+            "items": section_items,
+        })
     return {
         "ok": True,
         "item_count": len(items),
         "items": items,
+        "sections": section_results,
         "error": None,
     }
 
@@ -314,7 +394,7 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
     request_cls = module.StandaloneRequest
     normalized = normalize_dpjs_config(config)
     request_template = normalized["request_template"]
-    parser_config = normalized.get("result_parser") or {}
+    parse_sections = normalized.get("parse") or []
     downloader = None
     try:
         task_manager.update_status(
@@ -377,16 +457,16 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
                 "variables": variables,
                 **_response_payload(response),
             }
-            if parser_config.get("enabled"):
+            if parse_sections:
                 try:
-                    parsed = _execute_parser_code(result, parser_config)
+                    parsed = _execute_parse_sections(result, parse_sections, variables)
                     parsed_items[str(index)] = parsed["items"]
                     total_item_count += parsed["item_count"]
                     result["parsed"] = parsed
                     task_manager.add_log(task_id, f"[dpjs][parse] request {index}/{total}: {parsed['item_count']} items parsed")
                 except Exception as exc:
                     parsed_items[str(index)] = []
-                    result["parsed"] = {"ok": False, "item_count": 0, "items": [], "error": str(exc)}
+                    result["parsed"] = {"ok": False, "item_count": 0, "items": [], "sections": [], "error": str(exc)}
                     task_manager.add_log(task_id, f"[dpjs][parse][error] request {index}/{total}: {exc}", level="error")
             results.append(result)
             task_manager.add_log(
@@ -408,10 +488,7 @@ def run_dpjs_task(task_id: str, config: dict[str, Any], site_id: int | None = No
                 "count": normalized.get("loop_count"),
                 "step": normalized.get("loop_step"),
             },
-            "parser": {
-                "enabled": parser_config.get("enabled", False),
-                "code": parser_config.get("code", ""),
-            },
+            "parse": parse_sections,
             "items": parsed_items,
             "item_count": total_item_count,
             "request_count": len(results),

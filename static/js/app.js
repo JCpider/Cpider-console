@@ -322,15 +322,52 @@ function formatDpjsTemplateText(value) {
     return formatParsedJson(value || {});
 }
 
-function getDefaultDpjsParserField() {
-    return { name: "", path: "" };
+function formatDpjsParseText(value) {
+    const parseValue = Array.isArray(value) && value.length > 0 ? value : [
+        {
+            engine: "json",
+            rules: {
+                data: {},
+            },
+            mapping: {
+                "": { default: "" },
+            },
+        },
+    ];
+    return JSON.stringify(parseValue, null, 2);
 }
 
-function normalizeDpjsParserConfig(parser) {
-    return {
-        enabled: !!parser?.enabled,
-        code: formatText(parser?.code, "def parse(response):\n    data = response.json()\n    return {\n        \"items\": data.get(\"items\", []) if isinstance(data, dict) else data\n    }")
-    };
+function bindTextareaTabIndent(textarea) {
+    if (!textarea || textarea.dataset.tabIndentBound === "1") return;
+    textarea.addEventListener("keydown", (event) => {
+        if (event.key !== "Tab") return;
+        event.preventDefault();
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const value = textarea.value;
+        const indent = "    ";
+        if (event.shiftKey) {
+            const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+            const selected = value.slice(lineStart, end);
+            const updated = selected.replace(/(^|\n) {1,4}/g, "$1");
+            textarea.value = value.slice(0, lineStart) + updated + value.slice(end);
+            textarea.selectionStart = lineStart;
+            textarea.selectionEnd = lineStart + updated.length;
+            return;
+        }
+        if (start !== end && value.slice(start, end).includes("\n")) {
+            const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+            const selected = value.slice(lineStart, end);
+            const updated = selected.replace(/(^|\n)/g, `$1${indent}`);
+            textarea.value = value.slice(0, lineStart) + updated + value.slice(end);
+            textarea.selectionStart = lineStart;
+            textarea.selectionEnd = lineStart + updated.length;
+            return;
+        }
+        textarea.value = value.slice(0, start) + indent + value.slice(end);
+        textarea.selectionStart = textarea.selectionEnd = start + indent.length;
+    });
+    textarea.dataset.tabIndentBound = "1";
 }
 
 function renderDpjsParsedResult(task, pageIndex = 0) {
@@ -345,10 +382,10 @@ function renderDpjsParsedResult(task, pageIndex = 0) {
     }
 
     const resultJson = task.result_json || {};
-    const parser = resultJson.parser || {};
-    if (!parser.enabled) {
-        parsedEl.textContent = "未启用结果解析";
-        summaryEl.textContent = "parser disabled";
+    const parseConfig = Array.isArray(resultJson.parse) ? resultJson.parse : [];
+    if (parseConfig.length === 0) {
+        parsedEl.textContent = "未配置 parse";
+        summaryEl.textContent = "parse disabled";
         return;
     }
 
@@ -359,24 +396,11 @@ function renderDpjsParsedResult(task, pageIndex = 0) {
     const itemsMap = resultJson.items && typeof resultJson.items === "object" ? resultJson.items : {};
     const pageItems = Array.isArray(itemsMap[String(currentIndex + 1)]) ? itemsMap[String(currentIndex + 1)] : [];
 
-    parsedEl.textContent = JSON.stringify({
-        parser: {
-            enabled: !!parser.enabled,
-            code: formatText(parser.code, ""),
-        },
-        current_page: currentIndex + 1,
-        item_count: pageItems.length,
-        parsed: parsed || {
-            ok: true,
-            item_count: pageItems.length,
-            items: pageItems,
-            error: null,
-        },
-    }, null, 2);
+    parsedEl.textContent = JSON.stringify(parsed?.items || pageItems, null, 2);
 
     const totalItems = Number(resultJson.item_count || 0);
     const parsedStatus = parsed?.ok === false ? ` · error: ${formatText(parsed.error)}` : "";
-    summaryEl.textContent = `python parser · total ${totalItems} items · current ${pageItems.length} items${parsedStatus}`;
+    summaryEl.textContent = `parse config · total ${totalItems} items · current ${pageItems.length} items${parsedStatus}`;
 }
 
 function buildDpjsPayload() {
@@ -394,10 +418,7 @@ function buildDpjsPayload() {
         loop_step: Number(document.getElementById("dpjs-loop-step").value || 0),
         request_template: parseJsonField(document.getElementById("dpjs-request-template").value, {}),
         request_variables: parseJsonField(document.getElementById("dpjs-request-variables").value, []),
-        result_parser: {
-            enabled: document.getElementById("dpjs-parser-enabled").checked,
-            code: document.getElementById("dpjs-parser-code").value,
-        },
+        parse: parseJsonField(document.getElementById("dpjs-parse").value, []),
     };
 }
 
@@ -415,9 +436,7 @@ function setDpjsConfig(config) {
     document.getElementById("dpjs-loop-step").value = Number(config.loop_step || 0);
     document.getElementById("dpjs-request-template").value = formatDpjsTemplateText(config.request_template || {});
     document.getElementById("dpjs-request-variables").value = JSON.stringify(config.request_variables || [], null, 2);
-    const parserConfig = normalizeDpjsParserConfig(config.result_parser || {});
-    document.getElementById("dpjs-parser-enabled").checked = parserConfig.enabled;
-    document.getElementById("dpjs-parser-code").value = parserConfig.code;
+    document.getElementById("dpjs-parse").value = formatDpjsParseText(config.parse || []);
 }
 
 function toggleDpjsMultiRequestOptions() {
@@ -549,16 +568,7 @@ function renderDpjsResult(task, pageIndex = 0) {
             prevBtn.disabled = currentIndex === 0;
             nextBtn.disabled = currentIndex === results.length - 1;
             resultEl.dataset.pageIndex = String(currentIndex);
-            resultEl.textContent = JSON.stringify({
-                page_url: task.result_json.page_url,
-                multi_request: task.result_json.multi_request,
-                sleep_seconds: task.result_json.sleep_seconds,
-                loop: loopInfo,
-                parser: task.result_json.parser || {},
-                request_count: requestCount,
-                current_page: currentIndex + 1,
-                result: currentResult,
-            }, null, 2);
+            resultEl.textContent = JSON.stringify(currentResult?.body ?? currentResult ?? {}, null, 2);
         } else {
             paginationEl.hidden = true;
             resultEl.dataset.pageIndex = "0";
@@ -612,14 +622,17 @@ async function initDpjsSpider() {
     const prevBtn = document.getElementById("dpjs-result-prev");
     const nextBtn = document.getElementById("dpjs-result-next");
     const multiRequestToggle = document.getElementById("dpjs-multi-request");
-    const parserAddFieldBtn = document.getElementById("dpjs-parser-add-field");
-    const parserFields = document.getElementById("dpjs-parser-fields");
     const downloadJsonBtn = document.getElementById("dpjs-download-json");
     const downloadTxtBtn = document.getElementById("dpjs-download-txt");
     let socket = null;
     let currentTask = null;
     let isSubmittingStop = false;
     initDpjsHorizontalDragScroll(page);
+    [
+        document.getElementById("dpjs-request-template"),
+        document.getElementById("dpjs-request-variables"),
+        document.getElementById("dpjs-parse"),
+    ].forEach(bindTextareaTabIndent);
 
     const connectDpjsSocket = (taskId) => connectTaskSocket(taskId, {
         onStatus: (payload) => {
@@ -655,22 +668,6 @@ async function initDpjsSpider() {
 
     multiRequestToggle?.addEventListener("change", () => {
         toggleDpjsMultiRequestOptions();
-    });
-
-    parserAddFieldBtn?.addEventListener("click", () => {
-        const nextFields = [...collectDpjsParserFields(), getDefaultDpjsParserField()];
-        renderDpjsParserFields(nextFields);
-    });
-
-    parserFields?.addEventListener("click", (event) => {
-        const removeBtn = event.target.closest(".dpjs-parser-remove-field");
-        if (!removeBtn) return;
-        const row = removeBtn.closest(".dpjs-parser-field-row");
-        if (!row) return;
-        const fields = collectDpjsParserFields();
-        const index = Number(row.dataset.fieldIndex || -1);
-        const nextFields = fields.filter((_, fieldIndex) => fieldIndex !== index);
-        renderDpjsParserFields(nextFields.length > 0 ? nextFields : [getDefaultDpjsParserField()]);
     });
 
     downloadJsonBtn?.addEventListener("click", () => {
@@ -787,6 +784,7 @@ async function initDpjsSpider() {
         syncDpjsRunButton(currentTask, isSubmittingStop);
     });
 }
+
 
 function renderVideoTasks(tasks) {
     renderTaskRows(

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter
@@ -30,9 +31,10 @@ class RequestTemplatePayload(BaseModel):
     json_body: dict | list | str | int | float | bool | None = Field(default=None, alias="json")
 
 
-class ResultParserPayload(BaseModel):
-    enabled: bool = False
-    code: str = ""
+class ParseSectionPayload(BaseModel):
+    engine: str = "json"
+    rules: dict[str, Any] = Field(default_factory=dict)
+    mapping: dict[str, Any] = Field(default_factory=dict)
 
 
 class DpjsConfigPayload(BaseModel):
@@ -49,7 +51,7 @@ class DpjsConfigPayload(BaseModel):
     loop_step: float = 1
     request_template: RequestTemplatePayload
     request_variables: list[dict] = []
-    result_parser: ResultParserPayload = ResultParserPayload()
+    parse: list[ParseSectionPayload] = Field(default_factory=list)
 
 
 @router.get("")

@@ -91,16 +91,13 @@
 
                 <div class="dpjs-advanced-section dpjs-parser-section">
                     <div class="dpjs-parser-header">
-                        <label class="checkbox-label" for="dpjs-parser-enabled">
-                            <input id="dpjs-parser-enabled" type="checkbox">
-                            <span>启用结果解析</span>
-                        </label>
-                        <span class="hint">编写 Python 提取代码，可使用 response.json() 和 response.text</span>
+                        <span>解析配置</span>
+                        <span class="hint">直接填写 parse JSON 数组配置</span>
                     </div>
                     <div class="form-group">
-                        <label for="dpjs-parser-code">解析代码</label>
-                        <textarea id="dpjs-parser-code" rows="14" class="code-text dpjs-parser-code" spellcheck="false"></textarea>
-                        <p class="hint">定义 parse(response) 函数，并返回 items 列表或 {"items": [...]}。示例：data = response.json() / html = response.text</p>
+                        <label for="dpjs-parse">parse</label>
+                        <textarea id="dpjs-parse" rows="14" class="code-text dpjs-parser-code" spellcheck="false"></textarea>
+                        <p class="hint">示例：[{"engine":"json","rules":{"pageConfig":{"components.$v.linkParams":{"second_category_name":"name","second_category_id":"id"}}},"mapping":{"first_category_name":{"default":"{first_category_name}"},"first_category_id":{"default":"{first_category_id}"}}}]</p>
                     </div>
                 </div>
 
