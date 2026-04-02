@@ -25,11 +25,11 @@ env/
 
 # Logs
 *.log
-log/
-logs/
+/log/
+/logs/
 
 # Local data
-data/
+/data/
 
 # Build artifacts
 build/
