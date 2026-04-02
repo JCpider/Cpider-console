@@ -213,6 +213,14 @@ function buildRunningTask(task, message) {
     };
 }
 
+function buildStoppingTask(task, stopStatus, stoppingMessage) {
+    return {
+        ...task,
+        status: stopStatus === "cancelling" ? (task?.status || "running") : task?.status,
+        message: stopStatus === "cancelling" ? stoppingMessage : task?.message,
+    };
+}
+
 async function refreshTaskListAndDashboard(listPath, renderTasks) {
     const [list] = await Promise.all([
         requestJson(listPath),
@@ -786,11 +794,7 @@ async function initDpjsSpider() {
                 const stopResult = await requestJson(`/api/dpjs/tasks/${encodeURIComponent(taskId)}/cancel`, {
                     method: "POST",
                 });
-                currentTask = {
-                    ...currentTask,
-                    status: stopResult.status === "cancelling" ? (currentTask?.status || "running") : currentTask?.status,
-                    message: stopResult.status === "cancelling" ? "DPJS task stopping" : currentTask?.message,
-                };
+                currentTask = buildStoppingTask(currentTask, stopResult.status, "DPJS task stopping");
                 result.textContent = stopResult.ok ? "已提交停止请求" : (stopResult.message || "停止失败");
                 result.className = `form-result ${stopResult.ok ? "success" : "error"}`;
                 syncDpjsRunButton(currentTask, isSubmittingStop);
@@ -1064,7 +1068,7 @@ async function initVideoSpider() {
         });
     };
 
-        const refreshVideoTaskViews = async (taskId) => {
+    const refreshVideoTaskViews = async (taskId) => {
         currentTask = await loadVideoTask(taskId);
         await refreshTaskListAndDashboard("/api/video/tasks", renderVideoTasks);
         syncVideoRunButton(currentTask, isSubmittingStop);
@@ -1214,11 +1218,7 @@ async function initVideoSpider() {
                 const stopResult = await requestJson(`/api/video/tasks/${encodeURIComponent(taskId)}/cancel`, {
                     method: "POST",
                 });
-                currentTask = {
-                    ...currentTask,
-                    status: stopResult.status === "cancelling" ? (currentTask?.status || "running") : currentTask?.status,
-                    message: stopResult.status === "cancelling" ? "Video task stopping" : currentTask?.message,
-                };
+                currentTask = buildStoppingTask(currentTask, stopResult.status, "Video task stopping");
                 renderVideoResult(currentTask);
                 result.textContent = stopResult.ok ? "已提交停止请求" : (stopResult.message || "停止失败");
                 result.className = `form-result ${stopResult.ok ? "success" : "error"}`;
